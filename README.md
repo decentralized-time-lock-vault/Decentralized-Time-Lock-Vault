@@ -211,6 +211,12 @@ make deploy-testnet
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch naming, commit conventions, and the PR checklist.
+
+---
+
 ## License
 
 MIT
