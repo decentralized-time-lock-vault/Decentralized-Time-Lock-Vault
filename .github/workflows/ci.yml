@@ -74,12 +74,22 @@ jobs:
         run: cargo test --features testutils
 
   # ----------------------------------------------------------------
+  #  License & dependency policy
+  # ----------------------------------------------------------------
+  deny:
+    name: License & Bans (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # ----------------------------------------------------------------
   #  Build WASM
   # ----------------------------------------------------------------
   build:
     name: Build WASM
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, deny]
     steps:
       - uses: actions/checkout@v4
 
