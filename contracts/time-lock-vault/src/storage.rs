@@ -114,3 +114,20 @@ pub fn set_max_lock_secs(env: &Env, v: u64) {
 pub fn get_max_lock_secs(env: &Env) -> Option<u64> {
     env.storage().persistent().get(&VaultKey::MaxLockSecs)
 }
+
+// ----------------------------------------------------------------
+//  Fee recipient helpers
+// ----------------------------------------------------------------
+
+pub fn set_fee_recipient(env: &Env, recipient: &Address) {
+    env.storage()
+        .persistent()
+        .set(&VaultKey::FeeRecipient, recipient);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::FeeRecipient, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+pub fn get_fee_recipient(env: &Env) -> Option<Address> {
+    env.storage().persistent().get(&VaultKey::FeeRecipient)
+}
