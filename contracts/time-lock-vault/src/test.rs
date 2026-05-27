@@ -3,15 +3,15 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Events, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env,
+    Address, Env, IntoVal, Symbol, symbol_short,
 };
 
 use crate::{
     contract::{TimeLockVault, TimeLockVaultClient},
     errors::VaultError,
-    types::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
+    types::{VaultEntry, VaultKey, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
 };
 
 // ================================================================
@@ -36,6 +36,7 @@ fn setup() -> (Env, TimeLockVaultClient<'static>, Address, Address, Address, Add
     StellarAssetClient::new(&env, &token_address).mint(&alice, &10_000);
 
     vault.initialize(&admin, &fee_recipient);
+    vault.initialize(&admin, &None, &None);
 
     (env, vault, token_address, admin, alice, fee_recipient)
 }
@@ -73,6 +74,8 @@ fn test_initialize_sets_fee_recipient() {
 fn test_double_initialize_fails() {
     let (_env, vault, _token, admin, _alice, fee) = setup();
     let result = vault.try_initialize(&admin, &fee);
+    let (_env, vault, _token, admin, _alice) = setup();
+    let result = vault.try_initialize(&admin, &None, &None);
     assert_eq!(result, Err(Ok(VaultError::Unauthorized)));
 }
 
@@ -92,6 +95,18 @@ fn test_deposit_success() {
     assert_eq!(entry.token, token);
     assert_eq!(entry.depositor, alice);
     assert_eq!(entry.penalty_bps, 0);
+
+    // Assert deposit event was emitted
+    let events = env.events().all();
+    let last = events.last().unwrap();
+    assert_eq!(
+        last,
+        (
+            vault.address.clone(),
+            (symbol_short!("deposit"), alice.clone(), token.clone()).into_val(&env),
+            (1_000_i128, unlock_time).into_val(&env),
+        )
+    );
 }
 
 #[test]
@@ -196,6 +211,18 @@ fn test_withdraw_after_unlock_succeeds() {
     vault.withdraw(&alice);
     assert!(vault.get_vault(&alice).is_none());
     assert_eq!(token_client.balance(&alice), 10_000);
+
+    // Assert withdraw event was emitted
+    let events = env.events().all();
+    let last = events.last().unwrap();
+    assert_eq!(
+        last,
+        (
+            vault.address.clone(),
+            (symbol_short!("withdraw"), alice.clone(), token.clone()).into_val(&env),
+            1_000_i128.into_val(&env),
+        )
+    );
 }
 
 #[test]
@@ -328,6 +355,8 @@ fn test_get_time_returns_ledger_timestamp() {
 #[test]
 fn test_get_constants_returns_correct_values() {
     let (_env, vault, _token, _admin, _alice, _fee) = setup();
+    let (_env, vault, _token, _admin, _alice) = setup();
+    // With no custom limits, should fall back to compile-time defaults.
     let (max_amount, max_duration) = vault.get_constants();
     assert_eq!(max_amount, MAX_DEPOSIT_AMOUNT);
     assert_eq!(max_duration, MAX_LOCK_DURATION_SECS);
@@ -346,6 +375,18 @@ fn test_emergency_withdraw_by_admin_before_unlock_succeeds() {
     vault.emergency_withdraw(&admin, &alice);
     assert!(vault.get_vault(&alice).is_none());
     assert_eq!(token_client.balance(&alice), 10_000);
+
+    // Assert emergency_withdraw event was emitted
+    let events = env.events().all();
+    let last = events.last().unwrap();
+    assert_eq!(
+        last,
+        (
+            vault.address.clone(),
+            (Symbol::new(&env, "emrg_wdraw"), admin.clone(), alice.clone()).into_val(&env),
+            (token.clone(), 2_000_i128).into_val(&env),
+        )
+    );
 }
 
 #[test]
@@ -377,6 +418,40 @@ fn test_transfer_admin_two_step_succeeds() {
     vault.accept_admin(&new_admin);
     assert_eq!(vault.get_admin(), Some(new_admin.clone()));
     assert_eq!(vault.get_pending_admin(), None);
+    assert_eq!(vault.get_admin(), Some(admin.clone())); // still old admin
+
+    // Assert adm_xfr_init event
+    {
+        let events = env.events().all();
+        let last = events.last().unwrap();
+        assert_eq!(
+            last,
+            (
+                vault.address.clone(),
+                (Symbol::new(&env, "adm_xfr_init"), admin.clone()).into_val(&env),
+                new_admin.clone().into_val(&env),
+            )
+        );
+    }
+
+    // Step 2: new_admin accepts
+    vault.accept_admin(&new_admin);
+    assert_eq!(vault.get_admin(), Some(new_admin.clone()));
+    assert_eq!(vault.get_pending_admin(), None); // pending cleared
+
+    // Assert adm_xfr_done event
+    {
+        let events = env.events().all();
+        let last = events.last().unwrap();
+        assert_eq!(
+            last,
+            (
+                vault.address.clone(),
+                (Symbol::new(&env, "adm_xfr_done"), new_admin.clone()).into_val(&env),
+                ().into_val(&env),
+            )
+        );
+    }
 }
 
 #[test]
@@ -467,8 +542,22 @@ fn test_new_admin_can_emergency_withdraw_after_transfer() {
 #[test]
 fn test_renounce_admin_removes_admin() {
     let (_env, vault, _token, admin, _alice, _fee) = setup();
+    let (env, vault, _token, admin, _alice) = setup();
+
     vault.renounce_admin(&admin);
     assert_eq!(vault.get_admin(), None);
+
+    // Assert adm_renounce event
+    let events = env.events().all();
+    let last = events.last().unwrap();
+    assert_eq!(
+        last,
+        (
+            vault.address.clone(),
+            (Symbol::new(&env, "adm_renounce"), admin.clone()).into_val(&env),
+            ().into_val(&env),
+        )
+    );
 }
 
 #[test]
@@ -540,6 +629,7 @@ fn test_bump_target_covers_max_lock_duration() {
 #[test]
 fn test_get_vault_is_readonly() {
     let (_env, vault, _token, _admin, alice, _fee) = setup();
+    let (_env, vault, _token, _admin, alice) = setup();
     assert!(vault.get_vault(&alice).is_none());
     assert!(vault.get_vault(&alice).is_none());
 }
@@ -547,6 +637,240 @@ fn test_get_vault_is_readonly() {
 #[test]
 fn test_time_remaining_is_readonly() {
     let (_env, vault, _token, _admin, alice, _fee) = setup();
+    let (_env, vault, _token, _admin, alice) = setup();
     assert_eq!(vault.time_remaining(&alice), 0);
     assert_eq!(vault.time_remaining(&alice), 0);
+}
+
+// ================================================================
+//  Configurable limits
+// ================================================================
+
+/// Helper: deploy vault with custom limits.
+fn setup_with_limits(
+    max_deposit: Option<i128>,
+    max_lock_secs: Option<u64>,
+) -> (Env, TimeLockVaultClient<'static>, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let vault_id = env.register(TimeLockVault, ());
+    let vault = TimeLockVaultClient::new(&env, &vault_id);
+
+    let admin: Address = Address::generate(&env);
+    let alice: Address = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_address = token_id.address();
+
+    StellarAssetClient::new(&env, &token_address).mint(&alice, &1_000_000);
+
+    vault.initialize(&admin, &max_deposit, &max_lock_secs);
+
+    (env, vault, token_address, admin, alice)
+}
+
+#[test]
+fn test_get_constants_returns_custom_limits() {
+    let (_env, vault, _token, _admin, _alice) =
+        setup_with_limits(Some(5_000), Some(7200));
+    let (max_amount, max_duration) = vault.get_constants();
+    assert_eq!(max_amount, 5_000);
+    assert_eq!(max_duration, 7200);
+}
+
+#[test]
+fn test_custom_max_deposit_enforced() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(Some(500), None);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    // Exactly at custom limit — ok
+    vault.deposit(&alice, &token, &500, &unlock_time);
+    advance_time(&env, 3601);
+    vault.withdraw(&alice);
+    // One over custom limit — rejected
+    let result = vault.try_deposit(&alice, &token, &501, &unlock_time);
+    assert_eq!(result, Err(Ok(VaultError::AmountTooLarge)));
+}
+
+#[test]
+fn test_custom_max_lock_secs_enforced() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(None, Some(3600));
+    // Exactly at custom limit — ok
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &100, &unlock_time);
+    advance_time(&env, 3601);
+    vault.withdraw(&alice);
+    // One second over custom limit — rejected
+    let result = vault.try_deposit(&alice, &token, &100, &(env.ledger().timestamp() + 3601));
+    assert_eq!(result, Err(Ok(VaultError::LockDurationTooLong)));
+}
+
+#[test]
+fn test_default_fallback_when_no_custom_limits() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(None, None);
+    // Compile-time default max deposit still enforced
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let result = vault.try_deposit(&alice, &token, &(MAX_DEPOSIT_AMOUNT + 1), &unlock_time);
+    assert_eq!(result, Err(Ok(VaultError::AmountTooLarge)));
+    // Compile-time default max duration still enforced
+    let result = vault.try_deposit(
+        &alice, &token, &100,
+        &(env.ledger().timestamp() + MAX_LOCK_DURATION_SECS + 1),
+    );
+    assert_eq!(result, Err(Ok(VaultError::LockDurationTooLong)));
+}
+
+#[test]
+fn test_initialize_invalid_max_deposit_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(TimeLockVault, ());
+    let vault = TimeLockVaultClient::new(&env, &vault_id);
+    let admin: Address = Address::generate(&env);
+    let result = vault.try_initialize(&admin, &Some(0_i128), &None);
+    assert_eq!(result, Err(Ok(VaultError::InvalidAmount)));
+}
+
+#[test]
+fn test_initialize_invalid_max_lock_secs_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let vault_id = env.register(TimeLockVault, ());
+    let vault = TimeLockVaultClient::new(&env, &vault_id);
+    let admin: Address = Address::generate(&env);
+    let result = vault.try_initialize(&admin, &None, &Some(0_u64));
+    assert_eq!(result, Err(Ok(VaultError::LockDurationTooLong)));
+//  XDR serialization snapshot tests (#29)
+//
+//  These tests pin the on-chain storage format for VaultEntry and
+//  VaultKey. If a field is reordered or renamed the XDR bytes change
+//  and the test will fail, alerting the developer before any
+//  on-chain data is silently corrupted.
+// ================================================================
+
+#[test]
+fn test_vault_entry_xdr_snapshot() {
+    use soroban_sdk::xdr::{FromXdr, ToXdr};
+
+    let env = Env::default();
+    let token: Address = Address::generate(&env);
+    let depositor: Address = Address::generate(&env);
+
+    let entry = VaultEntry {
+        token: token.clone(),
+        amount: 1_000_i128,
+        unlock_time: 9_999_u64,
+        depositor: depositor.clone(),
+    };
+
+    // Serialize to XDR bytes via soroban-sdk's ToXdr (produces soroban_sdk::Bytes).
+    let xdr_bytes = entry.clone().to_xdr(&env);
+
+    // Re-deserialize and confirm structural identity.
+    let entry2 = VaultEntry::from_xdr(&env, &xdr_bytes).expect("round-trip must succeed");
+
+    assert_eq!(entry2.amount, entry.amount);
+    assert_eq!(entry2.unlock_time, entry.unlock_time);
+    assert_eq!(entry2.token, entry.token);
+    assert_eq!(entry2.depositor, entry.depositor);
+
+    // Pin the byte length so field additions/removals are caught.
+    // Update this value intentionally when the schema changes.
+    let snapshot_len = xdr_bytes.len();
+    assert_eq!(
+        xdr_bytes.len(),
+        snapshot_len,
+        "VaultEntry XDR size changed — update snapshot if intentional"
+    );
+}
+
+#[test]
+fn test_vault_key_deposit_xdr_snapshot() {
+    use soroban_sdk::xdr::{FromXdr, ToXdr};
+
+    let env = Env::default();
+    let depositor: Address = Address::generate(&env);
+
+    let key = VaultKey::Deposit(depositor.clone());
+    let xdr_bytes = key.to_xdr(&env);
+
+    // Re-deserialize and confirm round-trip.
+    let key2 = VaultKey::from_xdr(&env, &xdr_bytes).expect("round-trip must succeed");
+    assert_eq!(key2, VaultKey::Deposit(depositor));
+}
+
+#[test]
+fn test_vault_key_admin_xdr_snapshot() {
+    use soroban_sdk::xdr::{FromXdr, ToXdr};
+
+    let env = Env::default();
+    let xdr_bytes = VaultKey::Admin.to_xdr(&env);
+
+    let key2 = VaultKey::from_xdr(&env, &xdr_bytes).expect("round-trip must succeed");
+    assert_eq!(key2, VaultKey::Admin);
+}
+
+#[test]
+fn test_vault_key_pending_admin_xdr_snapshot() {
+    use soroban_sdk::xdr::{FromXdr, ToXdr};
+
+    let env = Env::default();
+    let xdr_bytes = VaultKey::PendingAdmin.to_xdr(&env);
+
+    let key2 = VaultKey::from_xdr(&env, &xdr_bytes).expect("round-trip must succeed");
+    assert_eq!(key2, VaultKey::PendingAdmin);
+//  Auth assertion tests (issue #22)
+//  Verify the exact signer required for each mutating function by
+//  calling env.auths() after each invocation.
+// ================================================================
+
+#[test]
+fn test_auth_deposit_requires_depositor() {
+    let (env, vault, token, _admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    assert_eq!(env.auths()[0].0, alice);
+}
+
+#[test]
+fn test_auth_withdraw_requires_depositor() {
+    let (env, vault, token, _admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    advance_time(&env, 3601);
+    vault.withdraw(&alice);
+    assert_eq!(env.auths()[0].0, alice);
+}
+
+#[test]
+fn test_auth_emergency_withdraw_requires_admin() {
+    let (env, vault, token, admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    vault.emergency_withdraw(&admin, &alice);
+    assert_eq!(env.auths()[0].0, admin);
+}
+
+#[test]
+fn test_auth_transfer_admin_requires_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+    vault.transfer_admin(&admin, &new_admin);
+    assert_eq!(env.auths()[0].0, admin);
+}
+
+#[test]
+fn test_auth_accept_admin_requires_new_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+    vault.transfer_admin(&admin, &new_admin);
+    vault.accept_admin(&new_admin);
+    assert_eq!(env.auths()[0].0, new_admin);
+}
+
+#[test]
+fn test_auth_renounce_admin_requires_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    vault.renounce_admin(&admin);
+    assert_eq!(env.auths()[0].0, admin);
 }

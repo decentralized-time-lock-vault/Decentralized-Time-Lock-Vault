@@ -29,6 +29,12 @@ impl TimeLockVault {
     /// # Errors
     /// * `Unauthorized` — Contract has already been initialized.
     pub fn initialize(env: Env, admin: Address, fee_recipient: Address) -> Result<(), VaultError> {
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        max_deposit: Option<i128>,
+        max_lock_secs: Option<u64>,
+    ) -> Result<(), VaultError> {
         admin.require_auth();
 
         if storage::get_admin(&env).is_some() {
@@ -37,6 +43,20 @@ impl TimeLockVault {
 
         storage::set_admin(&env, &admin);
         storage::set_fee_recipient(&env, &fee_recipient);
+
+        if let Some(v) = max_deposit {
+            if v <= 0 {
+                return Err(VaultError::InvalidAmount);
+            }
+            storage::set_max_deposit(&env, v);
+        }
+        if let Some(v) = max_lock_secs {
+            if v == 0 {
+                return Err(VaultError::LockDurationTooLong);
+            }
+            storage::set_max_lock_secs(&env, v);
+        }
+
         Ok(())
     }
 
@@ -76,7 +96,8 @@ impl TimeLockVault {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
-        if amount > MAX_DEPOSIT_AMOUNT {
+        let max_deposit = storage::get_max_deposit(&env).unwrap_or(MAX_DEPOSIT_AMOUNT);
+        if amount > max_deposit {
             return Err(VaultError::AmountTooLarge);
         }
         if penalty_bps > 10_000 {
@@ -87,8 +108,9 @@ impl TimeLockVault {
         if unlock_time <= now {
             return Err(VaultError::UnlockTimeNotInFuture);
         }
+        let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
         let lock_duration = unlock_time.saturating_sub(now);
-        if lock_duration > MAX_LOCK_DURATION_SECS {
+        if lock_duration > max_lock {
             return Err(VaultError::LockDurationTooLong);
         }
         // Enforce a minimum lock duration to avoid trivial deposits that
@@ -177,8 +199,8 @@ impl TimeLockVault {
         // --- Auth ---
         depositor.require_auth();
 
-        // --- Load deposit (bumps TTL — this is a state-changing call) ---
-        let entry = storage::get_deposit(&env, &depositor)
+        // --- Load deposit without bumping TTL; the entry will be deleted ---
+        let entry = storage::get_deposit_readonly(&env, &depositor)
             .ok_or(VaultError::NoDepositFound)?;
 
         // --- Time check ---
@@ -232,8 +254,8 @@ impl TimeLockVault {
             return Err(VaultError::Unauthorized);
         }
 
-        // --- Load deposit ---
-        let entry = storage::get_deposit(&env, &depositor)
+        // --- Load deposit without bumping TTL; the entry will be deleted ---
+        let entry = storage::get_deposit_readonly(&env, &depositor)
             .ok_or(VaultError::NoDepositFound)?;
 
         // --- Checks-Effects-Interactions ---
@@ -399,9 +421,12 @@ impl TimeLockVault {
         storage::get_pending_admin(&env)
     }
 
-    /// Returns the protocol constants for client-side validation.
-    pub fn get_constants(_env: Env) -> (i128, u64) {
-        (MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS)
+    /// Returns the effective limits for this deployment.
+    /// Returns runtime-configured values if set, otherwise compile-time defaults.
+    pub fn get_constants(env: Env) -> (i128, u64) {
+        let max_deposit = storage::get_max_deposit(&env).unwrap_or(MAX_DEPOSIT_AMOUNT);
+        let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
+        (max_deposit, max_lock)
     }
 
     /// Returns the fee recipient address set at initialization.
