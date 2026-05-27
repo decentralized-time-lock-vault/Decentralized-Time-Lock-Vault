@@ -181,11 +181,27 @@ make build
 make test
 ```
 
-### Full CI check (fmt + lint + test)
+### Full CI check (fmt + lint + test + audit + deny)
 
 ```bash
 make check
 ```
+
+### Security audit
+
+```bash
+make audit
+```
+
+Runs `cargo audit` to check all dependencies against the [RustSec Advisory Database](https://rustsec.org/).
+
+### License & dependency policy
+
+```bash
+make deny
+```
+
+Runs `cargo deny check` to enforce license allowlists and ban policies defined in `deny.toml`.
 
 ### Optimize WASM
 
