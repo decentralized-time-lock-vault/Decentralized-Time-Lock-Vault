@@ -72,6 +72,28 @@ fn test_double_initialize_fails() {
     assert_eq!(result, Err(Ok(VaultError::Unauthorized)));
 }
 
+#[test]
+fn test_is_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let vault_id = env.register(TimeLockVault, ());
+    let vault = TimeLockVaultClient::new(&env, &vault_id);
+    let admin: Address = Address::generate(&env);
+
+    // Before initialize()
+    assert!(!vault.is_initialized());
+
+    vault.initialize(&admin);
+
+    // After initialize()
+    assert!(vault.is_initialized());
+
+    // After renounce_admin() — still initialized, just trustless
+    vault.renounce_admin(&admin);
+    assert!(vault.is_initialized());
+}
+
 // ================================================================
 //  Deposit — happy path
 // ================================================================

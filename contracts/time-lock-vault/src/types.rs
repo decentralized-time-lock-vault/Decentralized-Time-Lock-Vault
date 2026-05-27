@@ -29,6 +29,8 @@ pub enum VaultKey {
     Admin,
     /// Pending admin address during a two-step admin transfer
     PendingAdmin,
+    /// Set to true once initialize() has been called; never removed
+    Initialized,
 }
 
 // ----------------------------------------------------------------

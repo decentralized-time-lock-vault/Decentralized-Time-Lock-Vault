@@ -38,6 +38,7 @@ impl TimeLockVault {
         }
 
         storage::set_admin(&env, &admin);
+        storage::set_initialized(&env);
         Ok(())
     }
 
@@ -352,5 +353,12 @@ impl TimeLockVault {
     /// Returns the protocol constants for client-side validation.
     pub fn get_constants(_env: Env) -> (i128, u64) {
         (MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS)
+    }
+
+    /// Returns `true` if `initialize()` has been called, `false` otherwise.
+    /// Remains `true` even after `renounce_admin()` — the contract is still
+    /// initialized, just operating in trustless mode.
+    pub fn is_initialized(env: Env) -> bool {
+        storage::is_initialized(&env)
     }
 }
