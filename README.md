@@ -260,6 +260,22 @@ export SOROBAN_SECRET_KEY=S...
 make deploy-testnet
 ```
 
+### Smoke Test (local node)
+
+Runs a quick end-to-end test against a local Soroban standalone node — no funded account or testnet access required.
+
+```bash
+# Build the WASM first, then run the smoke test
+make smoke-test-local
+```
+
+The script (`scripts/smoke_test_local.sh`):
+1. Starts a local node via `stellar network start local`
+2. Generates a funded test identity
+3. Deploys the contract and calls `initialize`, `deposit`, `get_vault`, `time_remaining`, and `withdraw`
+4. Asserts expected outputs at each step
+5. Stops the local node on exit
+
 ---
 
 ## Use Cases

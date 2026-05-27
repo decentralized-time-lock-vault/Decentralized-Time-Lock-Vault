@@ -723,4 +723,58 @@ fn test_vault_key_pending_admin_xdr_snapshot() {
 
     let key2 = VaultKey::from_xdr(&env, &xdr_bytes).expect("round-trip must succeed");
     assert_eq!(key2, VaultKey::PendingAdmin);
+//  Auth assertion tests (issue #22)
+//  Verify the exact signer required for each mutating function by
+//  calling env.auths() after each invocation.
+// ================================================================
+
+#[test]
+fn test_auth_deposit_requires_depositor() {
+    let (env, vault, token, _admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    assert_eq!(env.auths()[0].0, alice);
+}
+
+#[test]
+fn test_auth_withdraw_requires_depositor() {
+    let (env, vault, token, _admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    advance_time(&env, 3601);
+    vault.withdraw(&alice);
+    assert_eq!(env.auths()[0].0, alice);
+}
+
+#[test]
+fn test_auth_emergency_withdraw_requires_admin() {
+    let (env, vault, token, admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    vault.emergency_withdraw(&admin, &alice);
+    assert_eq!(env.auths()[0].0, admin);
+}
+
+#[test]
+fn test_auth_transfer_admin_requires_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+    vault.transfer_admin(&admin, &new_admin);
+    assert_eq!(env.auths()[0].0, admin);
+}
+
+#[test]
+fn test_auth_accept_admin_requires_new_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+    vault.transfer_admin(&admin, &new_admin);
+    vault.accept_admin(&new_admin);
+    assert_eq!(env.auths()[0].0, new_admin);
+}
+
+#[test]
+fn test_auth_renounce_admin_requires_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    vault.renounce_admin(&admin);
+    assert_eq!(env.auths()[0].0, admin);
 }

@@ -6,7 +6,7 @@ WASM_TARGET  := wasm32-unknown-unknown
 WASM_OUT     := target/wasm32-unknown-unknown/release/time_lock_vault.wasm
 OPTIMIZED    := target/time_lock_vault.optimized.wasm
 
-.PHONY: all build test fmt lint clean optimize deploy-testnet size check doc
+.PHONY: all build test fmt lint clean optimize deploy-testnet size check doc smoke-test-local
 
 ## Default: lint + test
 all: lint test
@@ -65,3 +65,7 @@ check-wasm-size: optimize
 		echo "ERROR: WASM too large: $${ACTUAL} bytes exceeds limit of $(MAX_WASM_BYTES) bytes"; \
 		exit 1; \
 	fi
+
+## Run smoke tests against a local Soroban standalone node (requires stellar CLI)
+smoke-test-local: build
+	bash scripts/smoke_test_local.sh
