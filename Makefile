@@ -6,7 +6,7 @@ WASM_TARGET  := wasm32-unknown-unknown
 WASM_OUT     := target/wasm32-unknown-unknown/release/time_lock_vault.wasm
 OPTIMIZED    := target/time_lock_vault.optimized.wasm
 
-.PHONY: all build test fmt lint clean optimize deploy-testnet size check check-wasm-size
+.PHONY: all build test fmt lint clean optimize deploy-testnet size check doc
 
 ## Default: lint + test
 all: lint test
@@ -33,6 +33,10 @@ lint:
 
 ## Run fmt-check + lint + test in sequence (mirrors CI)
 check: fmt-check lint test
+
+## Generate and open Rust API docs
+doc:
+	cargo doc --no-deps --open
 
 ## Remove build artifacts
 clean:

@@ -43,6 +43,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --features testutils -- -D warnings
 
+      - name: Build docs
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
   # ----------------------------------------------------------------
   #  Test
   # ----------------------------------------------------------------

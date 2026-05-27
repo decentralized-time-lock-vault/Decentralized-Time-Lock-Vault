@@ -138,8 +138,8 @@ impl TimeLockVault {
         // --- Auth ---
         depositor.require_auth();
 
-        // --- Load deposit (bumps TTL — this is a state-changing call) ---
-        let entry = storage::get_deposit(&env, &depositor)
+        // --- Load deposit without bumping TTL; the entry will be deleted ---
+        let entry = storage::get_deposit_readonly(&env, &depositor)
             .ok_or(VaultError::NoDepositFound)?;
 
         // --- Time check ---
@@ -193,8 +193,8 @@ impl TimeLockVault {
             return Err(VaultError::Unauthorized);
         }
 
-        // --- Load deposit ---
-        let entry = storage::get_deposit(&env, &depositor)
+        // --- Load deposit without bumping TTL; the entry will be deleted ---
+        let entry = storage::get_deposit_readonly(&env, &depositor)
             .ok_or(VaultError::NoDepositFound)?;
 
         // --- Checks-Effects-Interactions ---
