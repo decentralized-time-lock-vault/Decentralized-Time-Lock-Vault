@@ -7,6 +7,10 @@ use soroban_sdk::{contracttype, Address};
 pub const MAX_DEPOSIT_AMOUNT: i128 = 1_000_000_000_000_000;
 pub const MAX_LOCK_DURATION_SECS: u64 = 157_788_000;
 
+/// Minimum lock duration: prevent trivial, pointless vaults that waste storage.
+/// Set to 60 seconds to avoid very short-lived deposits.
+pub const MIN_LOCK_DURATION_SECS: u64 = 60;
+
 // ----------------------------------------------------------------
 //  Storage Keys
 // ----------------------------------------------------------------

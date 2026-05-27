@@ -2,8 +2,9 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
     errors::VaultError,
-    events, storage,
-    types::{VaultEntry, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
+    events,
+    storage,
+    types::{VaultEntry, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
 };
 
 #[contract]
@@ -53,8 +54,16 @@ impl TimeLockVault {
         if unlock_time.saturating_sub(now) > MAX_LOCK_DURATION_SECS {
             return Err(VaultError::LockDurationTooLong);
         }
+        // Enforce a minimum lock duration to avoid trivial deposits that
+        // immediately expire and waste persistent storage.
+        if lock_duration < MIN_LOCK_DURATION_SECS {
+            return Err(VaultError::LockDurationTooShort);
+        }
 
-        let deposit_id = storage::next_deposit_id(&env, &depositor);
+        // --- Duplicate deposit guard ---
+        if storage::get_deposit_readonly(&env, &depositor).is_some() {
+            return Err(VaultError::DepositAlreadyExists);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&depositor, &env.current_contract_address(), &amount);
@@ -144,6 +153,13 @@ impl TimeLockVault {
         if admin != stored_admin {
             return Err(VaultError::Unauthorized);
         }
+
+        // Prevent nominating the current admin as the pending admin — this
+        // would be a no-op that wastes storage and emits a misleading event.
+        if new_admin == stored_admin {
+            return Err(VaultError::InvalidAdmin);
+        }
+
         storage::set_pending_admin(&env, &new_admin);
         events::admin_transfer_initiated(&env, &admin, &new_admin);
         Ok(())

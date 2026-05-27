@@ -7,7 +7,11 @@ use crate::types::{VaultEntry, VaultKey};
 // ----------------------------------------------------------------
 
 pub const BUMP_THRESHOLD: u32 = 518_400;
-pub const BUMP_TARGET: u32 = 6_307_200;
+
+/// Target TTL after a bump (≈ 5.2 years at 5s/ledger).
+/// Must exceed MAX_LOCK_DURATION_SECS in ledger units (157_788_000s / 5s = 31_557_600 ledgers)
+/// so a max-duration deposit cannot expire before its unlock time.
+pub const BUMP_TARGET: u32 = 33_000_000;
 
 // ----------------------------------------------------------------
 //  Deposit counter helpers
