@@ -28,6 +28,50 @@ A production-ready Soroban smart contract on the Stellar blockchain that locks X
 
 ---
 
+## Architecture
+
+### Deposit / Withdraw Flow
+
+```
+Depositor
+   │
+   ├─► deposit(token, amount, unlock_time)
+   │       │
+   │       ├─ validate amount & unlock_time
+   │       ├─ token.transfer(depositor → contract)
+   │       ├─ storage::set_deposit(VaultKey::Deposit(depositor) → VaultEntry)
+   │       └─ emit "deposit" event
+   │
+   └─► withdraw(depositor)
+           │
+           ├─ load VaultEntry
+           ├─ assert now >= unlock_time
+           ├─ storage::remove_deposit(depositor)   ← state cleared first (CEI)
+           ├─ token.transfer(contract → depositor)
+           └─ emit "withdraw" event
+```
+
+### Storage Layout
+
+```
+Persistent Storage
+├── VaultKey::Admin                    → Address
+│       (set once on initialize; removed on renounce_admin)
+│
+├── VaultKey::PendingAdmin             → Address
+│       (set by transfer_admin; cleared by accept_admin / cancel_transfer_admin)
+│
+└── VaultKey::Deposit(depositor: Address) → VaultEntry
+        ├── token:       Address   (SEP-41 token contract)
+        ├── amount:      i128      (locked units)
+        ├── unlock_time: u64       (Unix seconds)
+        └── depositor:   Address   (owner; stored for event emission)
+```
+
+All entries use TTL bump threshold ≈ 30 days and target ≈ 5.2 years so a max-duration deposit cannot expire before its unlock time.
+
+---
+
 ## Project Structure
 
 ```
@@ -60,14 +104,16 @@ A production-ready Soroban smart contract on the Stellar blockchain that locks X
 
 ### Initialization
 
-#### `initialize(admin: Address)`
-Sets the admin address. Must be called once after deployment.
+#### `initialize(admin: Address, fee_recipient: Address)`
+Sets the admin address and the fee recipient for early-exit penalties. Must be called once after deployment.
+#### `initialize(admin: Address, max_deposit: Option<i128>, max_lock_secs: Option<u64>)`
+Sets the admin address. Optionally overrides the compile-time limits for this deployment. Pass `None` to use the defaults (`10^15` and `5 years`). Must be called once after deployment.
 
 ---
 
 ### Core
 
-#### `deposit(depositor, token, amount, unlock_time)`
+#### `deposit(depositor, token, amount, unlock_time, penalty_bps)`
 Locks `amount` of `token` until `unlock_time` (Unix seconds).
 
 | Param | Type | Constraint |
@@ -76,6 +122,10 @@ Locks `amount` of `token` until `unlock_time` (Unix seconds).
 | `token` | `Address` | SEP-41 token contract |
 | `amount` | `i128` | `0 < amount ≤ 10^15` |
 | `unlock_time` | `u64` | `now < unlock_time ≤ now + 5 years` |
+| `penalty_bps` | `u32` | `0–10000` (basis points for early-exit penalty) |
+
+#### `cancel_deposit(depositor)`
+Cancels an active deposit before the unlock time. The penalty (`penalty_bps` set at deposit time) is sent to the `fee_recipient`; the remainder is returned to the depositor. Fails with `FundsStillLocked` if the vault is already past its unlock time (use `withdraw` instead).
 
 #### `withdraw(depositor)`
 Withdraws funds if `now >= unlock_time`. Fails with `FundsStillLocked` otherwise.
@@ -119,7 +169,10 @@ Returns the current admin, or `None` if renounced.
 Returns the pending admin during a transfer, or `None`.
 
 #### `get_constants() → (i128, u64)`
-Returns `(MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS)` for client-side validation.
+Returns the effective `(MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS)` for this deployment — runtime-configured values if set at `initialize`, otherwise the compile-time defaults.
+
+#### `get_fee_recipient() → Option<Address>`
+Returns the fee recipient address set at initialization.
 
 ---
 
@@ -135,6 +188,7 @@ Returns `(MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS)` for client-side validatio
 | 6 | `LockDurationTooLong` | Lock period exceeds 5 years |
 | 7 | `Unauthorized` | Caller is not the admin |
 | 8 | `AmountTooLarge` | Amount exceeds 10^15 |
+| 9 | `InvalidPenaltyBps` | `penalty_bps` > 10000 |
 
 ---
 
