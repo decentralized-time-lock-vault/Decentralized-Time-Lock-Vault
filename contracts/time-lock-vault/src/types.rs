@@ -43,6 +43,8 @@ pub enum VaultKey {
 // ----------------------------------------------------------------
 
 /// Represents a single vault deposit.
+/// The depositor address is not stored here — it is already the storage key
+/// (VaultKey::Deposit(Address)), so duplicating it wastes persistent storage.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VaultEntry {
