@@ -510,6 +510,33 @@ fn test_time_remaining_after_unlock_is_zero() {
 }
 
 #[test]
+fn test_time_remaining_one_second_before_unlock() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    advance_time(&env, 3599);
+    assert_eq!(vault.time_remaining(&alice), 1);
+}
+
+#[test]
+fn test_time_remaining_exactly_at_unlock_is_zero() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    advance_time(&env, 3600);
+    assert_eq!(vault.time_remaining(&alice), 0);
+}
+
+#[test]
+fn test_time_remaining_one_second_past_unlock_no_underflow() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    advance_time(&env, 3601);
+    assert_eq!(vault.time_remaining(&alice), 0);
+}
+
+#[test]
 fn test_time_remaining_no_deposit_is_zero() {
     let (_env, vault, _token, _admin, alice) = setup();
     assert_eq!(vault.time_remaining(&alice, &0), 0);
