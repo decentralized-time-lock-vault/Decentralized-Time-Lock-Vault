@@ -207,6 +207,46 @@ Use `offset=0, limit=N` for the first page, then increment `offset` by `N` for s
 
 ---
 
+## Events
+
+All events are emitted via `env.events().publish(topics, data)`.
+
+| Event | Topics | Data |
+|---|---|---|
+| `deposit` | `("deposit", depositor, token)` | `(deposit_id, amount, unlock_time)` |
+| `withdraw` | `("withdraw", depositor, token)` | `(deposit_id, amount)` |
+| `emrg_wdraw` | `("emrg_wdraw", admin, depositor)` | `(deposit_id, token, amount)` |
+| `dep_cancel` | `("dep_cancel", depositor, token)` | `(amount, penalty)` |
+| `adm_xfr_init` | `("adm_xfr_init", current_admin)` | `pending_admin` |
+| `adm_xfr_done` | `("adm_xfr_done", new_admin)` | `()` |
+| `adm_renounce` | `("adm_renounce", former_admin)` | `()` |
+
+All `amount` and `penalty` values are `i128` token units. `deposit_id` is a `u32` per-depositor sequence number.
+
+---
+
+## Storage Layout
+
+All entries use **Persistent Storage** with TTL bump threshold ≈ 30 days (`BUMP_THRESHOLD = 518_400` ledgers) and target ≈ 5.2 years (`BUMP_TARGET = 33_000_000` ledgers), ensuring a max-duration deposit cannot expire before its unlock time.
+
+| Key | Type | Lifetime |
+|---|---|---|
+| `VaultKey::Admin` | `Address` | Set on `initialize`; removed on `renounce_admin` |
+| `VaultKey::PendingAdmin` | `Address` | Set by `transfer_admin`; cleared by `accept_admin` / `cancel_transfer_admin` |
+| `VaultKey::Initialized` | `bool` | Set once on `initialize`; never removed |
+| `VaultKey::FeeRecipient` | `Address` | Set on `initialize`; never removed |
+| `VaultKey::MaxDeposit` | `i128` | Set on `initialize` if overridden; absent means use compile-time default |
+| `VaultKey::MaxLockSecs` | `u64` | Set on `initialize` if overridden; absent means use compile-time default |
+| `VaultKey::DepositCounter(depositor)` | `u32` | Incremented on each `deposit`; never decremented |
+| `VaultKey::Deposit(depositor, id)` | `VaultEntry` | Created on `deposit`; removed on `withdraw` / `emergency_withdraw` / `cancel_deposit` |
+| `VaultKey::DepositorList` | `Vec<Address>` | Updated on `deposit` and `withdraw` |
+
+`VaultEntry` fields: `token: Address`, `amount: i128`, `unlock_time: u64`, `depositor: Address`, `penalty_bps: u32`.
+
+TTL is bumped on every **write**. Read-only query functions (`get_vault`, `time_remaining`, `get_time`) skip the TTL bump to avoid charging callers extra fees.
+
+---
+
 ## Error Codes
 
 | Code | Name | Meaning |
@@ -338,6 +378,20 @@ The script (`scripts/smoke_test_local.sh`):
 3. Deploys the contract and calls `initialize`, `deposit`, `get_vault`, `time_remaining`, and `withdraw`
 4. Asserts expected outputs at each step
 5. Stops the local node on exit
+
+---
+
+## Deployment Checklist
+
+Use this checklist when deploying to production.
+
+- [ ] Deploy and call `initialize` in the same transaction to prevent front-running
+- [ ] Verify `get_admin` returns the expected admin address
+- [ ] Run `get_constants` to confirm `MAX_DEPOSIT_AMOUNT` and `MAX_LOCK_DURATION_SECS` match your intended parameters
+- [ ] Verify `get_fee_recipient` returns the correct fee recipient address
+- [ ] Consider calling `renounce_admin` for fully trustless operation once setup is complete
+- [ ] Monitor storage TTL for long-duration vaults — entries are bumped on write but not on read
+- [ ] Confirm the optimized WASM size is within the Stellar network limit (`make check-wasm-size`)
 
 ---
 
