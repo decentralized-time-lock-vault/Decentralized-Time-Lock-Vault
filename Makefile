@@ -7,6 +7,10 @@ WASM_OUT     := target/wasm32-unknown-unknown/release/time_lock_vault.wasm
 OPTIMIZED    := target/time_lock_vault.optimized.wasm
 
 .PHONY: all build test fmt fmt-check lint check audit deny doc clean optimize deploy-testnet size check-wasm-size smoke-test-local help
+.PHONY: all build test fmt fmt-fix lint clean optimize deploy-testnet size check audit deny
+.PHONY: all build test fmt fmt-fix lint clean optimize deploy-testnet size check doc smoke-test-local
+.PHONY: all build test fmt lint clean optimize deploy-testnet size check audit deny
+.PHONY: all build test fmt lint clean optimize deploy-testnet size check doc smoke-test-local install-tools
 
 all: lint test ## Default: lint + test
 
@@ -23,6 +27,15 @@ fmt: ## Format all Rust source files
 	cargo fmt --all
 
 fmt-check: ## Check formatting without modifying files (used in CI)
+## Format all Rust source files
+fmt-fix:
+	cargo fmt --all
+
+## Backwards-compat alias for fmt-fix
+fmt: fmt-fix
+
+## Check formatting without modifying files (used in CI)
+fmt-check:
 	cargo fmt --all -- --check
 
 lint: ## Run Clippy linter (fail on warnings)
@@ -64,3 +77,10 @@ check-wasm-size: optimize ## Fail if optimized WASM exceeds MAX_WASM_BYTES (defa
 
 smoke-test-local: build ## Run smoke tests against a local Soroban standalone node (requires stellar CLI)
 	bash scripts/smoke_test_local.sh
+
+## Install all required dev tools (stellar-cli, cargo-watch, cargo-audit, cargo-deny)
+install-tools:
+	cargo install --locked stellar-cli
+	cargo install cargo-watch
+	cargo install cargo-audit
+	cargo install cargo-deny
