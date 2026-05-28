@@ -18,12 +18,9 @@ pub const MIN_LOCK_DURATION_SECS: u64 = 60;
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VaultKey {
-    /// Maps (depositor, deposit_id) → VaultEntry
-    Deposit(Address, u32),
-    /// Maps depositor → next deposit ID counter
-    DepositCounter(Address),
-    /// Contract-level admin address
+    /// Maps depositor → VaultEntry
     Deposit(Address),
+    /// Contract-level admin address
     Admin,
     PendingAdmin,
     /// Set to true once initialize() has been called; never removed
@@ -43,8 +40,7 @@ pub enum VaultKey {
 // ----------------------------------------------------------------
 
 /// Represents a single vault deposit.
-/// The depositor address is not stored here — it is already the storage key
-/// (VaultKey::Deposit(Address)), so duplicating it wastes persistent storage.
+/// The depositor address is stored here for event emission.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VaultEntry {

@@ -33,10 +33,10 @@ pub enum VaultError {
 
     /// penalty_bps exceeds 10000 (100%).
     InvalidPenaltyBps = 9,
-    
+
     /// The requested lock duration is shorter than the minimum allowed.
-    LockDurationTooShort = 9,
+    LockDurationTooShort = 10,
 
     /// The nominated admin address is invalid (e.g., same as current admin).
-    InvalidAdmin = 10,
+    InvalidAdmin = 11,
 }

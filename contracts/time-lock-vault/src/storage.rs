@@ -14,49 +14,19 @@ pub const BUMP_THRESHOLD: u32 = 518_400;
 pub const BUMP_TARGET: u32 = 33_000_000;
 
 // ----------------------------------------------------------------
-//  Deposit counter helpers
-// ----------------------------------------------------------------
-
-/// Returns the next deposit ID for `depositor` and increments the counter.
-pub fn next_deposit_id(env: &Env, depositor: &Address) -> u32 {
-    let key = VaultKey::DepositCounter(depositor.clone());
-    let id: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-    env.storage().persistent().set(&key, &(id + 1));
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
-    id
-}
-
-/// Returns all active deposit IDs for `depositor`.
-pub fn get_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
-    let counter_key = VaultKey::DepositCounter(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-
-    let mut ids = Vec::new(env);
-    for id in 0..count {
-        let key = VaultKey::Deposit(depositor.clone(), id);
-        if env.storage().persistent().has(&key) {
-            ids.push_back(id);
-        }
-    }
-    ids
-}
-
-// ----------------------------------------------------------------
 //  Deposit helpers
 // ----------------------------------------------------------------
 
-pub fn set_deposit(env: &Env, depositor: &Address, deposit_id: u32, entry: &VaultEntry) {
-    let key = VaultKey::Deposit(depositor.clone(), deposit_id);
+pub fn set_deposit(env: &Env, depositor: &Address, entry: &VaultEntry) {
+    let key = VaultKey::Deposit(depositor.clone());
     env.storage().persistent().set(&key, entry);
     env.storage()
         .persistent()
         .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
-pub fn get_deposit(env: &Env, depositor: &Address, deposit_id: u32) -> Option<VaultEntry> {
-    let key = VaultKey::Deposit(depositor.clone(), deposit_id);
+pub fn get_deposit(env: &Env, depositor: &Address) -> Option<VaultEntry> {
+    let key = VaultKey::Deposit(depositor.clone());
     let entry: Option<VaultEntry> = env.storage().persistent().get(&key);
     if entry.is_some() {
         env.storage()
@@ -66,13 +36,18 @@ pub fn get_deposit(env: &Env, depositor: &Address, deposit_id: u32) -> Option<Va
     entry
 }
 
-pub fn get_deposit_readonly(env: &Env, depositor: &Address, deposit_id: u32) -> Option<VaultEntry> {
-    let key = VaultKey::Deposit(depositor.clone(), deposit_id);
+pub fn get_deposit_readonly(env: &Env, depositor: &Address) -> Option<VaultEntry> {
+    let key = VaultKey::Deposit(depositor.clone());
     env.storage().persistent().get(&key)
 }
 
-pub fn remove_deposit(env: &Env, depositor: &Address, deposit_id: u32) {
-    let key = VaultKey::Deposit(depositor.clone(), deposit_id);
+pub fn has_deposit(env: &Env, depositor: &Address) -> bool {
+    let key = VaultKey::Deposit(depositor.clone());
+    env.storage().persistent().has(&key)
+}
+
+pub fn remove_deposit(env: &Env, depositor: &Address) {
+    let key = VaultKey::Deposit(depositor.clone());
     env.storage().persistent().remove(&key);
 }
 
@@ -126,12 +101,17 @@ pub fn is_initialized(env: &Env) -> bool {
         .persistent()
         .get::<VaultKey, bool>(&VaultKey::Initialized)
         .unwrap_or(false)
+}
+
+// ----------------------------------------------------------------
 //  Runtime limits helpers
 // ----------------------------------------------------------------
 
 pub fn set_max_deposit(env: &Env, v: i128) {
     env.storage().persistent().set(&VaultKey::MaxDeposit, &v);
-    env.storage().persistent().extend_ttl(&VaultKey::MaxDeposit, BUMP_THRESHOLD, BUMP_TARGET);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::MaxDeposit, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
 pub fn get_max_deposit(env: &Env) -> Option<i128> {
@@ -140,7 +120,9 @@ pub fn get_max_deposit(env: &Env) -> Option<i128> {
 
 pub fn set_max_lock_secs(env: &Env, v: u64) {
     env.storage().persistent().set(&VaultKey::MaxLockSecs, &v);
-    env.storage().persistent().extend_ttl(&VaultKey::MaxLockSecs, BUMP_THRESHOLD, BUMP_TARGET);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::MaxLockSecs, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
 pub fn get_max_lock_secs(env: &Env) -> Option<u64> {
@@ -187,6 +169,11 @@ fn save_depositor_list(env: &Env, list: &Vec<Address>) {
 /// Append `depositor` to the global depositor list.
 pub fn add_depositor(env: &Env, depositor: &Address) {
     let mut list = get_depositor_list(env);
+    for addr in list.iter() {
+        if addr == depositor {
+            return;
+        }
+    }
     list.push_back(depositor.clone());
     save_depositor_list(env, &list);
 }
@@ -220,44 +207,6 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     page
 }
 
-// ----------------------------------------------------------------
-//  Fee recipient helpers
-// ----------------------------------------------------------------
-
-pub fn set_fee_recipient(env: &Env, recipient: &Address) {
-    env.storage()
-        .persistent()
-        .set(&VaultKey::FeeRecipient, recipient);
-    env.storage()
-        .persistent()
-        .extend_ttl(&VaultKey::FeeRecipient, BUMP_THRESHOLD, BUMP_TARGET);
-}
-
-pub fn get_fee_recipient(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&VaultKey::FeeRecipient)
-}
-
-// ----------------------------------------------------------------
-//  Depositor list helpers
-// ----------------------------------------------------------------
-
-fn get_depositor_list(env: &Env) -> Vec<Address> {
-    env.storage()
-        .persistent()
-        .get(&VaultKey::DepositorList)
-        .unwrap_or_else(|| Vec::new(env))
-}
-
-fn save_depositor_list(env: &Env, list: &Vec<Address>) {
-    env.storage()
-        .persistent()
-        .set(&VaultKey::DepositorList, list);
-    env.storage()
-        .persistent()
-        .extend_ttl(&VaultKey::DepositorList, BUMP_THRESHOLD, BUMP_TARGET);
-}
-
-/// Append `depositor` to the global depositor list.
 pub fn add_depositor(env: &Env, depositor: &Address) {
     let mut list = get_depositor_list(env);
     list.push_back(depositor.clone());
