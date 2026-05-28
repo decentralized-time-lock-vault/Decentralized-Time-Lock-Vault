@@ -270,14 +270,7 @@ impl TimeLockVault {
         deposit_id: u32,
     ) -> Result<(), VaultError> {
         admin.require_auth();
-
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
-
-        let entry =
-            storage::get_deposit(&env, &depositor, deposit_id).ok_or(VaultError::NoDepositFound)?;
+        storage::require_admin(&env, &admin)?;
 
         storage::remove_deposit(&env, &depositor, deposit_id);
         // --- Load deposit without bumping TTL; the entry will be deleted ---
@@ -309,14 +302,11 @@ impl TimeLockVault {
 
     pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
 
         // Prevent nominating the current admin as the pending admin — this
         // would be a no-op that wastes storage and emits a misleading event.
-        if new_admin == stored_admin {
+        if new_admin == admin {
             return Err(VaultError::InvalidAdmin);
         }
 
@@ -339,20 +329,14 @@ impl TimeLockVault {
 
     pub fn cancel_transfer_admin(env: Env, admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
         storage::remove_pending_admin(&env);
         Ok(())
     }
 
     pub fn renounce_admin(env: Env, admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
         env.storage()
             .persistent()
             .remove(&crate::types::VaultKey::Admin);

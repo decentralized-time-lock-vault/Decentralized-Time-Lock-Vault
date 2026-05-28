@@ -1,5 +1,6 @@
 use soroban_sdk::{Address, Env, Vec};
 
+use crate::errors::VaultError;
 use crate::types::{VaultEntry, VaultKey};
 
 // ----------------------------------------------------------------
@@ -106,6 +107,14 @@ pub fn get_pending_admin(env: &Env) -> Option<Address> {
 
 pub fn remove_pending_admin(env: &Env) {
     env.storage().persistent().remove(&VaultKey::PendingAdmin);
+}
+
+pub fn require_admin(env: &Env, caller: &Address) -> Result<(), VaultError> {
+    let stored = get_admin(env).ok_or(VaultError::Unauthorized)?;
+    if caller != &stored {
+        return Err(VaultError::Unauthorized);
+    }
+    Ok(())
 }
 
 // ----------------------------------------------------------------
