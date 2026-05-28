@@ -157,6 +157,25 @@ fn test_deposit_at_max_amount_succeeds() {
 }
 
 #[test]
+fn test_deposit_minimum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let token_client = TokenClient::new(&env, &token);
+    let unlock_time = env.ledger().timestamp() + 3600;
+
+    vault.deposit(&alice, &token, &1, &unlock_time, &0);
+
+    let entry = vault.get_vault(&alice, &0).expect("entry should exist");
+    assert_eq!(entry.amount, 1);
+    assert_eq!(entry.unlock_time, unlock_time);
+    assert_eq!(entry.token, token);
+    assert_eq!(entry.depositor, alice);
+
+    // Alice started with 10_000; 1 unit transferred to contract
+    assert_eq!(token_client.balance(&alice), 9_999);
+    assert_eq!(token_client.balance(&vault.address), 1);
+}
+
+#[test]
 fn test_deposit_past_unlock_time_fails() {
     let (env, vault, token, _admin, alice) = setup();
     let unlock_time = env.ledger().timestamp();
