@@ -402,6 +402,16 @@ The script (`scripts/smoke_test_local.sh`):
 
 ---
 
+## Updating the Stellar CLI Version
+
+`STELLAR_CLI_VERSION` is defined as a top-level `env` variable in `.github/workflows/ci.yml`. Dependabot keeps GitHub Actions versions up to date automatically, but it does not track arbitrary binary downloads. When a new `stellar-cli` release is published at https://github.com/stellar/stellar-cli/releases, update the variable manually:
+
+```yaml
+# .github/workflows/ci.yml
+env:
+  STELLAR_CLI_VERSION: "<new-version>"
+```
+
 ## Deployment Checklist
 
 Use this checklist when deploying to production.
