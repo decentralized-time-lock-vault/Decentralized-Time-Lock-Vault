@@ -1010,3 +1010,45 @@ fn test_auth_renounce_admin_requires_admin() {
     vault.renounce_admin(&admin);
     assert_eq!(env.auths()[0].0, admin);
 }
+
+// ================================================================
+//  Emergency withdraw — post-state assertions (#27)
+// ================================================================
+
+#[test]
+fn test_emergency_withdraw_clears_vault_entry() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    vault.emergency_withdraw(&admin, &alice);
+
+    assert!(vault.get_vault(&alice).is_none());
+}
+
+#[test]
+fn test_emergency_withdraw_twice_returns_no_deposit_found() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    vault.emergency_withdraw(&admin, &alice);
+
+    assert_eq!(
+        vault.try_emergency_withdraw(&admin, &alice),
+        Err(Ok(VaultError::NoDepositFound))
+    );
+}
+
+#[test]
+fn test_redeposit_after_emergency_withdraw_succeeds() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    vault.emergency_withdraw(&admin, &alice);
+
+    let new_unlock = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &500, &new_unlock, &0);
+    assert_eq!(vault.get_vault(&alice).unwrap().amount, 500);
+}
