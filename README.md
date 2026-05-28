@@ -341,6 +341,76 @@ The script (`scripts/smoke_test_local.sh`):
 
 ---
 
+## Fee Estimation
+
+Soroban charges fees for persistent storage operations. Here is what each call costs at a high level:
+
+| Operation | Storage effect |
+|---|---|
+| `deposit` | Creates a new persistent entry + pays for initial TTL bump (~30-day threshold, ~5.2-year target) |
+| `withdraw` / `cancel_deposit` / `emergency_withdraw` | Removes the persistent entry (storage freed) |
+| `get_vault`, `time_remaining`, `get_time` | Read-only — **no TTL bump**, no extra storage fee |
+| `initialize` | Writes admin / fee-recipient entries once |
+
+Key points:
+- The depositor pays the storage-creation fee on `deposit`.
+- View functions intentionally skip TTL bumps to avoid charging callers for reads.
+- For very long locks (approaching 5 years) the TTL is set well beyond the unlock time, so no manual TTL extension is needed.
+
+For current fee rates see the [Stellar fee documentation](https://developers.stellar.org/docs/learn/fundamentals/fees-resource-limits-metering).
+
+---
+
+## Known Limitations
+
+| Limitation | Detail |
+|---|---|
+| One deposit per address | A depositor must `withdraw` or `cancel_deposit` before making a new deposit. |
+| No partial withdrawals | The full locked amount is returned in one call; partial releases are not supported. |
+| No early withdrawal without admin | Only `cancel_deposit` (with a penalty) or an admin `emergency_withdraw` can release funds before the unlock time. |
+| Single admin address | Admin is one key — no multisig or DAO governance. Use `renounce_admin` to go fully trustless. |
+| Storage TTL | Persistent entries are bumped to ~5.2 years on every write. Deposits longer than that would require a TTL extension call (current max lock is 5 years, so this is not an issue in practice). |
+
+---
+
+## Testing
+
+### Run all tests
+
+```bash
+make test
+```
+
+### Run a specific test
+
+```bash
+cargo test test_deposit_success --features testutils -- --nocapture
+```
+
+### Run all tests with output
+
+```bash
+cargo test --features testutils -- --nocapture
+```
+
+> Tests run natively (without `--target wasm32-unknown-unknown`) so that `soroban-sdk`'s `testutils` feature works correctly.
+
+### Test categories
+
+The suite (`contracts/time-lock-vault/src/test.rs`) contains 48+ tests covering:
+
+| Category | What is tested |
+|---|---|
+| Deposit | Valid deposits, duplicate deposits, amount/time boundary checks |
+| Withdraw | Successful withdrawal, early withdrawal rejection, missing deposit |
+| Cancel deposit | Penalty calculation, fee recipient transfer, post-unlock rejection |
+| Admin | `transfer_admin`, `accept_admin`, `cancel_transfer_admin`, `renounce_admin` |
+| Emergency withdraw | Admin-only access, funds always go to depositor |
+| Read-only queries | `get_vault`, `time_remaining`, `get_time`, `get_constants`, pagination |
+| Error codes | Every `VaultError` variant is exercised |
+
+---
+
 ## Use Cases
 
 - **Savings accounts** — Lock funds for a fixed period to enforce saving discipline.
