@@ -101,6 +101,7 @@ impl TimeLockVault {
         }
 
         let token_client = token::Client::new(&env, &token);
+        debug_assert!(amount > 0, "transfer amount must be positive");
         token_client.transfer(&depositor, &env.current_contract_address(), &amount);
 
         let entry = VaultEntry {
@@ -149,9 +150,11 @@ impl TimeLockVault {
         if penalty > 0 {
             let fee_recipient = storage::get_fee_recipient(&env)
                 .unwrap_or_else(|| depositor.clone());
+            debug_assert!(penalty > 0, "transfer amount must be positive");
             token_client.transfer(&contract, &fee_recipient, &penalty);
         }
         if refund > 0 {
+            debug_assert!(refund > 0, "transfer amount must be positive");
             token_client.transfer(&contract, &depositor, &refund);
         }
 
@@ -216,6 +219,7 @@ impl TimeLockVault {
         storage::remove_depositor(&env, &depositor);
 
         let token_client = token::Client::new(&env, &entry.token);
+        debug_assert!(entry.amount > 0, "transfer amount must be positive");
         token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
 
         events::withdraw(&env, &depositor, &entry.token, entry.amount);
@@ -251,6 +255,7 @@ impl TimeLockVault {
         storage::remove_depositor(&env, &depositor);
 
         let token_client = token::Client::new(&env, &entry.token);
+        debug_assert!(entry.amount > 0, "transfer amount must be positive");
         token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
 
         events::emergency_withdraw(&env, &admin, &depositor, &entry.token, entry.amount);
