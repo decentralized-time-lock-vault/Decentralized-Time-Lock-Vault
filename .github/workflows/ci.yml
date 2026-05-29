@@ -106,12 +106,22 @@ jobs:
         run: cargo geiger --all-features
 
   # ----------------------------------------------------------------
+  #  License & dependency policy
+  # ----------------------------------------------------------------
+  deny:
+    name: License & Bans (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # ----------------------------------------------------------------
   #  Build WASM
   # ----------------------------------------------------------------
   build:
     name: Build WASM
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, deny]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

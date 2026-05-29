@@ -1,0 +1,55 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[licenses]
+# Licenses that are explicitly allowed
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Zlib",
+]
+# Confidence threshold for license text matching (0.0–1.0)
+confidence-threshold = 0.8
+
+[[licenses.deny]]
+name = "GPL-2.0"
+
+[[licenses.deny]]
+name = "GPL-3.0"
+
+[[licenses.deny]]
+name = "AGPL-3.0"
+
+[[licenses.deny]]
+name = "LGPL-2.0"
+
+[[licenses.deny]]
+name = "LGPL-2.1"
+
+[[licenses.deny]]
+name = "LGPL-3.0"
+
+[bans]
+# Warn (not deny) on duplicate versions — soroban-sdk pulls in multiple
+# versions of syn, darling, hashbrown, etc. that we cannot control.
+multiple-versions = "warn"
+# Deny wildcard dependencies
+wildcards = "deny"
+
+[advisories]
+# Let cargo-audit handle vulnerability advisories; deny.toml focuses on
+# licenses and bans only.
+ignore = []
+
+[sources]
+# Only allow crates from crates.io
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
