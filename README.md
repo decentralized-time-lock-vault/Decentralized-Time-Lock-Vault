@@ -307,6 +307,16 @@ Plan deployments carefully. Audit the contract before going to mainnet, because 
 
 ---
 
+## Known Limitations
+
+- **One active deposit per address in the documented flow.** The README and error model describe deposits as address-keyed entries, so a depositor should withdraw or cancel the current vault entry before opening another one.
+- **No partial withdrawals.** A withdrawal or emergency withdrawal returns the full stored amount for the vault entry; the contract does not expose an amount parameter for withdrawing only part of a deposit.
+- **No early user withdrawal.** Standard `withdraw` only succeeds once `unlock_time` has passed. Early exits must use the explicit cancellation flow where configured, or the admin emergency path.
+- **Single-admin control.** Admin functions are controlled by one admin address at a time. The contract supports two-step admin transfer and renouncing admin rights, but it does not implement native multisig approval.
+- **Storage TTL requires operational monitoring for long locks.** Persistent entries are bumped during writes, but long-lived deployments should monitor TTL assumptions so maximum-duration locks remain recoverable.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
