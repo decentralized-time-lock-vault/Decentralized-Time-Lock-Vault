@@ -379,7 +379,7 @@ impl TimeLockVault {
         admin.require_auth();
         storage::require_admin(&env, &admin)?;
         env.storage()
-            .persistent()
+            .instance()
             .remove(&crate::types::VaultKey::Admin);
         storage::remove_pending_admin(&env);
         events::admin_renounced(&env, &admin);
