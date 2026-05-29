@@ -1187,3 +1187,41 @@ fn test_redeposit_after_emergency_withdraw_succeeds() {
     vault.deposit(&alice, &token, &500, &new_unlock, &0);
     assert_eq!(vault.get_vault(&alice).unwrap().amount, 500);
 }
+
+// ================================================================
+//  Multi-user isolation integration test (#26)
+// ================================================================
+
+#[test]
+fn test_multi_user_concurrent_deposit_and_sequential_withdrawal() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    let token_client = TokenClient::new(&env, &token);
+    StellarAssetClient::new(&env, &token).mint(&bob, &2_000);
+
+    // Alice deposits 1,000 with 1-hour lock; Bob deposits 2,000 with 2-hour lock.
+    let now = env.ledger().timestamp();
+    vault.deposit(&alice, &token, &1_000, &(now + 3600), &0);
+    vault.deposit(&bob,   &token, &2_000, &(now + 7200), &0);
+
+    // Advance 1 hour — Alice unlocked, Bob still locked.
+    advance_time(&env, 3601);
+
+    vault.withdraw(&alice);
+    assert_eq!(vault.try_withdraw(&bob), Err(Ok(VaultError::FundsStillLocked)));
+
+    // Alice's vault is gone; Bob's is intact.
+    assert!(vault.get_vault(&alice).is_none());
+    assert_eq!(vault.get_vault(&bob).unwrap().amount, 2_000);
+
+    // Advance 1 more hour — Bob now unlocked.
+    advance_time(&env, 3600);
+
+    vault.withdraw(&bob);
+    assert!(vault.get_vault(&bob).is_none());
+
+    // Both balances fully restored; contract holds nothing.
+    assert_eq!(token_client.balance(&alice), 10_000);
+    assert_eq!(token_client.balance(&bob),    2_000);
+    assert_eq!(token_client.balance(&vault.address), 0);
+}
