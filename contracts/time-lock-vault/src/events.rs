@@ -1,12 +1,12 @@
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{Address, Env, Symbol};
 
 pub fn deposit(env: &Env, depositor: &Address, token: &Address, amount: i128, unlock_time: u64) {
-    let topics = (symbol_short!("deposit"), depositor.clone(), token.clone());
+    let topics = (Symbol::new(env, "deposit"), depositor.clone(), token.clone());
     env.events().publish(topics, (amount, unlock_time));
 }
 
 pub fn withdraw(env: &Env, depositor: &Address, token: &Address, amount: i128) {
-    let topics = (symbol_short!("withdraw"), depositor.clone(), token.clone());
+    let topics = (Symbol::new(env, "withdraw"), depositor.clone(), token.clone());
     env.events().publish(topics, amount);
 }
 
