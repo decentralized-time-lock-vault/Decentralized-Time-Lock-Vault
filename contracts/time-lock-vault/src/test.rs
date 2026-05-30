@@ -1292,3 +1292,72 @@ fn test_deposit_exact_max_amount_succeeds() {
     assert!(vault.try_deposit(&alice, &token, &MAX_DEPOSIT_AMOUNT, &unlock_time, &0).is_ok());
     assert_eq!(vault.get_vault(&alice).unwrap().amount, MAX_DEPOSIT_AMOUNT);
 }
+
+// ================================================================
+//  #101 – token balances correct after emergency_withdraw
+// ================================================================
+
+#[test]
+fn test_emergency_withdraw_token_balances() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let token_client = TokenClient::new(&env, &token);
+    let unlock_time = env.ledger().timestamp() + 86400;
+    let amount: i128 = 3_000;
+
+    vault.deposit(&alice, &token, &amount, &unlock_time, &0);
+
+    let alice_before = token_client.balance(&alice);
+    let contract_before = token_client.balance(&vault.address);
+    let admin_before = token_client.balance(&admin);
+
+    vault.emergency_withdraw(&admin, &alice);
+
+    // Depositor received the funds back
+    assert_eq!(token_client.balance(&alice), alice_before + amount);
+    // Contract balance decreased by the deposited amount
+    assert_eq!(token_client.balance(&vault.address), contract_before - amount);
+    // Admin balance is unchanged — funds never go to admin
+    assert_eq!(token_client.balance(&admin), admin_before);
+}
+
+// ================================================================
+//  #102 – deposit fails when depositor has insufficient balance
+// ================================================================
+
+#[test]
+fn test_deposit_fails_insufficient_balance() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    // Mint 0 extra tokens — alice has 10_000 from setup; use a fresh address with 0 balance
+    let broke: Address = Address::generate(&env);
+    let unlock_time = env.ledger().timestamp() + 3600;
+
+    // broke has 0 tokens; deposit of 100 must fail at the token transfer level
+    let result = vault.try_deposit(&broke, &token, &100, &unlock_time, &0);
+    assert!(result.is_err());
+
+    // No vault entry should have been written
+    assert!(vault.get_vault(&broke).is_none());
+}
+
+// ================================================================
+//  #103 – get_constants returns correct compile-time values
+// ================================================================
+
+#[test]
+fn test_get_constants() {
+    let (_env, vault, _token, _admin, _alice, _fee) = setup();
+    let (max_amount, max_duration) = vault.get_constants();
+    assert_eq!(max_amount, 1_000_000_000_000_000_i128);
+    assert_eq!(max_duration, 157_788_000_u64);
+}
+
+// ================================================================
+//  #104 – time_remaining returns 0 when no deposit exists
+// ================================================================
+
+#[test]
+fn test_time_remaining_no_deposit() {
+    let (env, vault, _token, _admin, _alice, _fee) = setup();
+    let never_deposited: Address = Address::generate(&env);
+    assert_eq!(vault.time_remaining(&never_deposited), 0);
+}

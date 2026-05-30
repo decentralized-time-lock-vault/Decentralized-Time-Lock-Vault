@@ -35,3 +35,22 @@ contracts/*/optimized/
 # Temporary / misc
 *.log
 *.tmp
+
+# Cargo lock for libraries (keep for binaries/contracts)
+# Uncomment if this is a library crate:
+# Cargo.lock
+
+# Coverage reports
+lcov.info
+tarpaulin-report.html
+coverage/
+
+# Profiling / flamegraph artifacts
+perf.data
+perf.data.old
+flamegraph.svg
+
+# Soroban test snapshots (all patterns)
+**/.soroban/
+**/test_snapshots/
+*.snap
