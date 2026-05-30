@@ -381,9 +381,7 @@ impl TimeLockVault {
     pub fn renounce_admin(env: Env, admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
         storage::require_admin(&env, &admin)?;
-        env.storage()
-            .instance()
-            .remove(&crate::types::VaultKey::Admin);
+        storage::remove_admin(&env);
         storage::remove_pending_admin(&env);
         events::admin_renounced(&env, &admin);
         Ok(())

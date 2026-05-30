@@ -131,6 +131,11 @@ pub fn remove_pending_admin(env: &Env) {
     env.storage().instance().remove(&VaultKey::PendingAdmin);
 }
 
+/// Removes the admin entry (called when admin renounces).
+pub fn remove_admin(env: &Env) {
+    env.storage().instance().remove(&VaultKey::Admin);
+}
+
 pub fn require_admin(env: &Env, caller: &Address) -> Result<(), VaultError> {
     let stored = get_admin(env).ok_or(VaultError::Unauthorized)?;
     if caller != &stored {
