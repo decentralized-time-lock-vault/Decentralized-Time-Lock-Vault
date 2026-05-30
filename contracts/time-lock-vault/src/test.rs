@@ -1225,3 +1225,69 @@ fn test_multi_user_concurrent_deposit_and_sequential_withdrawal() {
     assert_eq!(token_client.balance(&bob),    2_000);
     assert_eq!(token_client.balance(&vault.address), 0);
 }
+
+// ================================================================
+//  #93 – cancel_transfer_admin → accept_admin fails
+// ================================================================
+
+#[test]
+fn test_cancel_transfer_admin_then_accept_admin_fails() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+
+    vault.transfer_admin(&admin, &new_admin);
+    vault.cancel_transfer_admin(&admin);
+
+    // After cancellation, new_admin is no longer pending — accept must fail.
+    assert_eq!(
+        vault.try_accept_admin(&new_admin),
+        Err(Ok(VaultError::Unauthorized))
+    );
+}
+
+// ================================================================
+//  #94 – get_pending_admin returns None after accept_admin
+// ================================================================
+
+#[test]
+fn test_get_pending_admin_none_after_accept_admin() {
+    let (env, vault, _token, admin, _alice) = setup();
+    let new_admin: Address = Address::generate(&env);
+
+    vault.transfer_admin(&admin, &new_admin);
+    vault.accept_admin(&new_admin);
+
+    assert_eq!(vault.get_pending_admin(), None);
+}
+
+// ================================================================
+//  #95 – emergency_withdraw fails after renounce_admin
+// ================================================================
+
+#[test]
+fn test_emergency_withdraw_fails_after_renounce_admin() {
+    let (env, vault, token, admin, alice) = setup();
+    let unlock_time = env.ledger().timestamp() + 86400;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    vault.renounce_admin(&admin);
+
+    assert_eq!(
+        vault.try_emergency_withdraw(&admin, &alice),
+        Err(Ok(VaultError::Unauthorized))
+    );
+}
+
+// ================================================================
+//  #96 – deposit exact MAX_DEPOSIT_AMOUNT succeeds
+// ================================================================
+
+#[test]
+fn test_deposit_exact_max_amount_succeeds() {
+    let (env, vault, token, _admin, alice) = setup();
+    StellarAssetClient::new(&env, &token).mint(&alice, &MAX_DEPOSIT_AMOUNT);
+    let unlock_time = env.ledger().timestamp() + 3600;
+
+    assert!(vault.try_deposit(&alice, &token, &MAX_DEPOSIT_AMOUNT, &unlock_time, &0).is_ok());
+    assert_eq!(vault.get_vault(&alice).unwrap().amount, MAX_DEPOSIT_AMOUNT);
+}
