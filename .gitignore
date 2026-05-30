@@ -11,7 +11,8 @@ contracts/*/target
 .env.*.local
 
 # Editor directories
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
