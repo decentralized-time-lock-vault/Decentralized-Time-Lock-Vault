@@ -5,6 +5,9 @@
 
 #![no_std]
 
+// Compile-time assertion: ensure u64 is 8 bytes (closes #82)
+const _: () = assert!(std::mem::size_of::<u64>() == 8);
+
 mod constants;
 mod contract;
 mod errors;

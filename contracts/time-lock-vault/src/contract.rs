@@ -82,7 +82,7 @@ impl TimeLockVault {
         }
 
         let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
-        let lock_duration = unlock_time.saturating_sub(now);
+        let lock_duration: u64 = unlock_time.saturating_sub(now);
         if lock_duration > max_lock {
             return Err(VaultError::LockDurationTooLong);
         }
@@ -140,7 +140,7 @@ impl TimeLockVault {
         }
 
         let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
-        let lock_duration = unlock_time.saturating_sub(now);
+        let lock_duration: u64 = unlock_time.saturating_sub(now);
         if lock_duration > max_lock {
             return Err(VaultError::LockDurationTooLong);
         }
@@ -330,6 +330,7 @@ impl TimeLockVault {
     //  Read-only Queries
     // ----------------------------------------------------------------
 
+    /// No auth required — this is a public read-only query (closes #81)
     pub fn get_vault(env: Env, depositor: Address, deposit_id: u32) -> Option<VaultEntry> {
         storage::get_deposit_readonly(&env, &depositor, deposit_id)
     }
@@ -342,6 +343,7 @@ impl TimeLockVault {
         env.ledger().timestamp()
     }
 
+    /// No auth required — this is a public read-only query (closes #81)
     pub fn time_remaining(env: Env, depositor: Address, deposit_id: u32) -> u64 {
         match storage::get_deposit_readonly(&env, &depositor, deposit_id) {
             None => 0,
