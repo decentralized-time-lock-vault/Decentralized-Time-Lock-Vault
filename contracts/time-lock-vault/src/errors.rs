@@ -15,4 +15,5 @@ pub enum VaultError {
     InvalidPenaltyBps = 9,
     InvalidAdmin = 10,
     LockDurationTooShort = 11,
+    ContractPaused = 12,
 }

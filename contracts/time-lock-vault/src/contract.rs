@@ -69,6 +69,10 @@ impl TimeLockVault {
     ) -> Result<u32, VaultError> {
         depositor.require_auth();
 
+        if storage::is_paused(&env) {
+            return Err(VaultError::ContractPaused);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -126,6 +130,10 @@ impl TimeLockVault {
         penalty_bps: u32,
     ) -> Result<u32, VaultError> {
         payer.require_auth();
+
+        if storage::is_paused(&env) {
+            return Err(VaultError::ContractPaused);
+        }
 
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
@@ -313,6 +321,34 @@ impl TimeLockVault {
         Err(VaultError::NoDepositFound)
     }
 
+    pub fn withdraw_to(
+        env: Env,
+        depositor: Address,
+        deposit_id: u32,
+        recipient: Address,
+    ) -> Result<(), VaultError> {
+        depositor.require_auth();
+
+        let entry = storage::get_deposit_readonly(&env, &depositor, deposit_id)
+            .ok_or(VaultError::NoDepositFound)?;
+
+        let now = env.ledger().timestamp();
+        if now < entry.unlock_time {
+            return Err(VaultError::FundsStillLocked);
+        }
+
+        storage::remove_deposit(&env, &depositor, deposit_id);
+        if storage::get_deposit_ids(&env, &depositor).len() == 0 {
+            storage::remove_depositor(&env, &depositor);
+        }
+
+        let token_client = token::Client::new(&env, &entry.token);
+        token_client.transfer(&env.current_contract_address(), &recipient, &entry.amount);
+
+        events::withdraw_to(&env, &depositor, &recipient, &entry.token, entry.amount);
+        Ok(())
+    }
+
     // ----------------------------------------------------------------
     //  Admin: Emergency Withdrawal
     // ----------------------------------------------------------------
@@ -339,6 +375,36 @@ impl TimeLockVault {
 
         events::emergency_withdraw(&env, &admin, &depositor, &entry.token, entry.amount);
         Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    //  Admin: Pause / Unpause
+    // ----------------------------------------------------------------
+
+    pub fn pause(env: Env, admin: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        storage::set_paused(&env, true);
+        events::paused(&env, &admin);
+        Ok(())
+    }
+
+    pub fn unpause(env: Env, admin: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
+        if admin != stored_admin {
+            return Err(VaultError::Unauthorized);
+        }
+        storage::set_paused(&env, false);
+        events::unpaused(&env, &admin);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
     }
 
     // ----------------------------------------------------------------

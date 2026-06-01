@@ -234,6 +234,24 @@ pub fn get_depositor_count(env: &Env) -> u32 {
     get_depositor_list(env).len()
 }
 
+// ----------------------------------------------------------------
+//  Paused flag helpers
+// ----------------------------------------------------------------
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().persistent().set(&VaultKey::Paused, &paused);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .persistent()
+        .get::<VaultKey, bool>(&VaultKey::Paused)
+        .unwrap_or(false)
+}
+
 pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     let list = get_depositor_list(env);
     let len = list.len();

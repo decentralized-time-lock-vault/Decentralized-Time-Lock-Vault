@@ -18,6 +18,7 @@ pub enum VaultKey {
     FeeRecipient,
     MaxDeposit,
     MaxLockSecs,
+    Paused,
 }
 
 #[contracttype]
