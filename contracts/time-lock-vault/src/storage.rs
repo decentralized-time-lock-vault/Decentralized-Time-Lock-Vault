@@ -165,6 +165,7 @@ pub fn set_max_lock_secs(env: &Env, v: u64) {
         .extend_ttl(&VaultKey::MaxLockSecs, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
+/// Returns the runtime-configured max lock duration, or `None` to use the compile-time default.
 pub fn get_max_lock_secs(env: &Env) -> Option<u64> {
     env.storage().persistent().get(&VaultKey::MaxLockSecs)
 }
@@ -173,6 +174,7 @@ pub fn get_max_lock_secs(env: &Env) -> Option<u64> {
 //  Fee recipient helpers
 // ----------------------------------------------------------------
 
+/// Persists the `fee_recipient` address and bumps TTL. Called once during `initialize`.
 pub fn set_fee_recipient(env: &Env, recipient: &Address) {
     env.storage()
         .persistent()

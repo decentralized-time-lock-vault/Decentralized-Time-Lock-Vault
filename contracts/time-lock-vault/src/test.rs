@@ -670,6 +670,7 @@ fn test_time_remaining_no_deposit_is_zero() {
     assert_eq!(vault.time_remaining(&alice, &0), 0);
 }
 
+/// #105 — get_time must return the current ledger timestamp.
 #[test]
 fn test_get_time_returns_ledger_timestamp() {
     let (env, vault, _token, _admin, _alice, _fee) = setup();
@@ -967,7 +968,7 @@ fn test_time_remaining_is_readonly() {
 
 #[test]
 fn test_depositor_count_empty() {
-    let (_env, vault, _token, _admin, _alice, _fee) = setup();
+    let (_env, vault, _token, _admin, _alice) = setup();
     assert_eq!(vault.get_depositor_count(), 0);
 }
 
@@ -980,7 +981,7 @@ fn test_depositors_empty_returns_empty_vec() {
 
 #[test]
 fn test_depositor_count_single_entry() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     assert_eq!(vault.get_depositor_count(), 1);
@@ -999,7 +1000,7 @@ fn test_depositors_single_entry() {
 
 #[test]
 fn test_depositor_count_multiple_entries() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let bob: Address = Address::generate(&env);
     let carol: Address = Address::generate(&env);
 
@@ -1036,7 +1037,7 @@ fn test_depositors_multiple_entries_full_page() {
 
 #[test]
 fn test_depositor_removed_on_withdraw() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     assert_eq!(vault.get_depositor_count(), 1);
@@ -1051,7 +1052,7 @@ fn test_depositor_removed_on_withdraw() {
 
 #[test]
 fn test_depositor_removed_on_emergency_withdraw() {
-    let (env, vault, token, admin, alice, _fee) = setup();
+    let (env, vault, token, admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 86400;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     assert_eq!(vault.get_depositor_count(), 1);
@@ -1085,7 +1086,7 @@ fn test_depositor_list_consistent_after_partial_removal() {
 
 #[test]
 fn test_pagination_offset_and_limit() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let bob: Address = Address::generate(&env);
     let carol: Address = Address::generate(&env);
 
@@ -1322,7 +1323,7 @@ fn test_vault_key_pending_admin_xdr_snapshot() {
 
 #[test]
 fn test_auth_deposit_requires_depositor() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     assert_eq!(env.auths()[0].0, alice);
@@ -1340,7 +1341,7 @@ fn test_auth_deposit_for_requires_payer() {
 
 #[test]
 fn test_auth_withdraw_requires_depositor() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (env, vault, token, _admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     advance_time(&env, 3601);
@@ -1350,7 +1351,7 @@ fn test_auth_withdraw_requires_depositor() {
 
 #[test]
 fn test_auth_emergency_withdraw_requires_admin() {
-    let (env, vault, token, admin, alice, _fee) = setup();
+    let (env, vault, token, admin, alice) = setup();
     let unlock_time = env.ledger().timestamp() + 86400;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
     vault.emergency_withdraw(&admin, &alice, &0);

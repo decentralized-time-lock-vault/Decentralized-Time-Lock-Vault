@@ -39,6 +39,16 @@ pub fn admin_renounced(env: &Env, former_admin: &Address) {
     env.events().publish(topics, ());
 }
 
+pub fn lock_extended(
+    env: &Env,
+    depositor: &Address,
+    old_unlock_time: u64,
+    new_unlock_time: u64,
+) {
+    let topics = (Symbol::new(env, "lock_extended"), depositor.clone());
+    env.events().publish(topics, (old_unlock_time, new_unlock_time));
+}
+
 pub fn deposit_cancelled(
     env: &Env,
     depositor: &Address,

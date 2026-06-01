@@ -1,6 +1,12 @@
+// ============================================================
+//  Time-Lock Vault — Soroban Smart Contract
+//  Stellar Blockchain | Soroban SDK v22
+// ============================================================
+
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
+    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
     errors::VaultError,
     events, storage,
     types::{VaultEntry, LedgerVaultEntry, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_BATCH_SIZE},
@@ -318,11 +324,7 @@ impl TimeLockVault {
         deposit_id: u32,
     ) -> Result<(), VaultError> {
         admin.require_auth();
-
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
 
         let entry = storage::get_deposit_readonly(&env, &depositor, deposit_id)
             .ok_or(VaultError::NoDepositFound)?;
@@ -424,6 +426,8 @@ impl TimeLockVault {
         storage::get_deposit_ids(&env, &depositor)
     }
 
+    /// Returns the current ledger timestamp.
+    /// Read-only — does not bump storage TTL.
     pub fn get_time(env: Env) -> u64 {
         env.ledger().timestamp()
     }
