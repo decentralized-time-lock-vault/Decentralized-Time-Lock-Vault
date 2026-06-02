@@ -29,6 +29,11 @@ pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admi
     env.events().publish(topics, pending_admin.clone());
 }
 
+pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_xfr_cancel"), current_admin.clone());
+    env.events().publish(topics, pending_admin.clone());
+}
+
 pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
     let topics = (Symbol::new(env, "adm_xfr_done"), new_admin.clone());
     env.events().publish(topics, ());

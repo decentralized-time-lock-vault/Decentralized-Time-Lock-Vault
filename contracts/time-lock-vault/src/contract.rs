@@ -449,7 +449,12 @@ impl TimeLockVault {
             return Err(VaultError::Unauthorized);
         }
 
-        storage::remove_pending_admin(&env);
+        // Emit an event when a pending admin is cancelled so off-chain indexers
+        // and UIs observing admin state transitions won't show a stale pending admin.
+        if let Some(pending) = storage::get_pending_admin(&env) {
+            storage::remove_pending_admin(&env);
+            events::admin_transfer_cancelled(&env, &admin, &pending);
+        }
         Ok(())
     }
 
