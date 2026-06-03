@@ -1,9 +1,13 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::types::{VaultEntry, VaultKey, LedgerVaultEntry};
+use crate::types::{VaultEntry, VaultKey, LedgerVaultEntry, MAX_LOCK_DURATION_SECS};
 
+// Number of seconds per ledger — Soroban ledgers are ~5 seconds apart.
+pub const LEDGER_SECONDS: u64 = 5;
+
+// How many ledgers to extend TTL to cover the maximum allowed lock duration.
 pub const BUMP_THRESHOLD: u32 = 518_400;
-pub const BUMP_TARGET: u32 = 33_000_000;
+pub const BUMP_TARGET: u32 = ((MAX_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LEDGER_SECONDS) as u32;
 
 // ----------------------------------------------------------------
 //  Deposit counter helpers
