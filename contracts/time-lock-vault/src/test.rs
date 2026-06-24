@@ -1383,6 +1383,149 @@ fn test_auth_renounce_admin_requires_admin() {
 }
 
 // ================================================================
+//  Fuzz / boundary: minimum and maximum deposit amounts (#308)
+// ================================================================
+
+// deposit: amount == 1 (minimum valid) must succeed
+#[test]
+fn test_deposit_minimum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let id = vault.deposit(&alice, &token, &1, &unlock_time, &0);
+    assert_eq!(vault.get_vault(&alice, &id).unwrap().amount, 1);
+}
+
+// deposit: amount == MAX_DEPOSIT_AMOUNT (maximum valid) must succeed
+#[test]
+fn test_deposit_maximum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    StellarAssetClient::new(&env, &token).mint(&alice, &MAX_DEPOSIT_AMOUNT);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let id = vault.deposit(&alice, &token, &MAX_DEPOSIT_AMOUNT, &unlock_time, &0);
+    assert_eq!(vault.get_vault(&alice, &id).unwrap().amount, MAX_DEPOSIT_AMOUNT);
+}
+
+// deposit: amount == MAX_DEPOSIT_AMOUNT + 1 must fail with AmountTooLarge
+#[test]
+fn test_deposit_one_above_maximum_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    assert_eq!(
+        vault.try_deposit(&alice, &token, &(MAX_DEPOSIT_AMOUNT + 1), &unlock_time, &0),
+        Err(Ok(VaultError::AmountTooLarge))
+    );
+}
+
+// deposit_for: amount == 1 (minimum valid) must succeed
+#[test]
+fn test_deposit_for_minimum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let id = vault.deposit_for(&alice, &bob, &token, &1, &unlock_time, &0);
+    assert_eq!(vault.get_vault(&bob, &id).unwrap().amount, 1);
+}
+
+// deposit_for: amount == MAX_DEPOSIT_AMOUNT (maximum valid) must succeed
+#[test]
+fn test_deposit_for_maximum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    StellarAssetClient::new(&env, &token).mint(&alice, &MAX_DEPOSIT_AMOUNT);
+    let bob: Address = Address::generate(&env);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let id = vault.deposit_for(&alice, &bob, &token, &MAX_DEPOSIT_AMOUNT, &unlock_time, &0);
+    assert_eq!(vault.get_vault(&bob, &id).unwrap().amount, MAX_DEPOSIT_AMOUNT);
+}
+
+// deposit_for: amount == MAX_DEPOSIT_AMOUNT + 1 must fail with AmountTooLarge
+#[test]
+fn test_deposit_for_one_above_maximum_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    assert_eq!(
+        vault.try_deposit_for(&alice, &bob, &token, &(MAX_DEPOSIT_AMOUNT + 1), &unlock_time, &0),
+        Err(Ok(VaultError::AmountTooLarge))
+    );
+}
+
+// deposit_by_ledger: amount == 1 (minimum valid) must succeed
+#[test]
+fn test_deposit_by_ledger_minimum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 100;
+    // Calling deposit_by_ledger without panic is sufficient; the deposit counter increments.
+    let id = vault.deposit_by_ledger(&alice, &token, &1, &unlock_ledger, &0);
+    assert_eq!(id, 0);
+    // depositor is registered in the depositor list
+    assert_eq!(vault.get_depositor_count(), 1);
+}
+
+// deposit_by_ledger: amount == 0 must fail with InvalidAmount
+#[test]
+fn test_deposit_by_ledger_zero_amount_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 100;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &0, &unlock_ledger, &0),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+// deposit_by_ledger: amount == -1 must fail with InvalidAmount
+#[test]
+fn test_deposit_by_ledger_negative_amount_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 100;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &-1, &unlock_ledger, &0),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+// deposit_by_ledger: amount == MAX_DEPOSIT_AMOUNT must succeed
+#[test]
+fn test_deposit_by_ledger_maximum_amount_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    StellarAssetClient::new(&env, &token).mint(&alice, &MAX_DEPOSIT_AMOUNT);
+    let unlock_ledger = env.ledger().sequence() + 100;
+    let id = vault.deposit_by_ledger(&alice, &token, &MAX_DEPOSIT_AMOUNT, &unlock_ledger, &0);
+    assert_eq!(id, 0);
+    assert_eq!(vault.get_depositor_count(), 1);
+}
+
+// deposit_by_ledger: amount == MAX_DEPOSIT_AMOUNT + 1 must fail with AmountTooLarge
+#[test]
+fn test_deposit_by_ledger_one_above_maximum_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 100;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &(MAX_DEPOSIT_AMOUNT + 1), &unlock_ledger, &0),
+        Err(Ok(VaultError::AmountTooLarge))
+    );
+}
+
+// custom max_deposit: deposit at exactly the custom ceiling must succeed
+#[test]
+fn test_custom_max_deposit_exact_boundary_succeeds() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(Some(500), None);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    let id = vault.deposit(&alice, &token, &500, &unlock_time, &0);
+    assert_eq!(vault.get_vault(&alice, &id).unwrap().amount, 500);
+}
+
+// custom max_deposit: deposit at custom ceiling + 1 must fail
+#[test]
+fn test_custom_max_deposit_one_above_boundary_fails() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(Some(500), None);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    assert_eq!(
+        vault.try_deposit(&alice, &token, &501, &unlock_time, &0),
+        Err(Ok(VaultError::AmountTooLarge))
+    );
+}
+
+// ================================================================
 //  Boundary & lifecycle tests (#97 – #100)
 // ================================================================
 
