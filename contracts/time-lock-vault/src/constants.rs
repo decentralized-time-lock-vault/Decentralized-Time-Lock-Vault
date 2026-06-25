@@ -11,10 +11,13 @@ pub const MAX_LOCK_DURATION_SECS: u64 = 157_788_000;
 /// Minimum lock duration: prevent trivial, pointless vaults that waste storage.
 pub const MIN_LOCK_DURATION_SECS: u64 = 60;
 
-/// Maximum depositors per `batch_emergency_withdraw` call.
+/// Maximum depositors per `get_vault_batch` call.
 ///
 /// Soroban's per-transaction instruction budget is ~100M instructions.
-/// Each iteration performs two persistent-storage removes, one token transfer,
-/// and one event publish — roughly 1–2M instructions each.
-/// 25 leaves comfortable headroom for the common migration use-case.
-pub const MAX_BATCH_SIZE: u32 = 25;
+/// Each iteration reads one persistent storage entry — roughly 0.5–1M instructions.
+/// 20 leaves comfortable headroom.
+///
+/// NOTE: This constant is also defined in `types.rs` (value = 20).
+/// The `contract.rs` imports both; the `types` import takes precedence.
+/// The authoritative value used at runtime is 20.
+pub const MAX_BATCH_SIZE: u32 = 20;

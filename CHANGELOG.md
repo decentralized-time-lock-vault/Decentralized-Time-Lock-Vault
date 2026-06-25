@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `deposit_by_ledger(depositor, token, amount, unlock_ledger, penalty_bps) → u32` — locks tokens until a specific ledger sequence number; uses `VaultKey::DepositByLedger` storage; not subject to the pause flag
+- `deposit_for(payer, depositor, token, amount, unlock_time, penalty_bps) → u32` — third-party funded timestamp deposit; `payer` signs and pays; deposit credited to `depositor`
+- `withdraw_to(depositor, deposit_id, recipient)` — timestamp-based withdrawal to a custom recipient; `depositor` must sign
+- `pause(admin)` / `unpause(admin)` / `is_paused() → bool` — admin-controlled pause that blocks `deposit` and `deposit_for`; emits `"paused"` / `"unpaused"` events
+- `get_vault_batch(depositors, deposit_id) → Vec<Option<VaultEntry>>` — batch read of up to `MAX_BATCH_SIZE` vault entries in a single call
+- `get_deposit_ids(depositor) → Vec<u32>` — returns all active deposit IDs for a depositor (timestamp and ledger types)
+- `is_initialized() → bool` — query whether `initialize` has been called
+- `initialize` now requires a mandatory `fee_recipient: Address` parameter (previously implicit)
+- Multiple active deposits per address are now supported; each deposit gets a unique `deposit_id` from a per-depositor counter
+- `VaultKey::Paused` persistent storage key for pause flag
+- `VaultKey::DepositByLedger(depositor, id)` persistent storage key for ledger-based deposits
+- `LedgerVaultEntry` struct: `token`, `amount`, `unlock_ledger`, `depositor`, `penalty_bps`
+- `ContractPaused` error code 12 — returned when `deposit`/`deposit_for` called while paused
+- `adm_xfr_cancel` event — emitted by `cancel_transfer_admin`; topics `("adm_xfr_cancel", current_admin)`, data `pending_admin`
+- `withdraw_to` event — topics `("withdraw_to", depositor, recipient, token)`, data `amount`
+
+### Changed
+
+- Error code 12 renamed from `BatchTooLarge` to `ContractPaused` (no `batch_emergency_withdraw` function exists; `BatchTooLarge` was documented but never implemented)
+- `emergency_withdraw` now takes an explicit `deposit_id` parameter; previously operated on the single deposit per address
+- Events `deposit` data payload is `(amount, unlock_time)` — **not** `(deposit_id, amount, unlock_time)` as previously documented
+- Events `withdraw` data payload is `amount` — **not** `(deposit_id, amount)` as previously documented
+- Events `emrg_wdraw` data payload is `(admin, token, amount)` — **not** `(deposit_id, admin, token, amount)` as previously documented
+
+### Removed
+
+- `batch_emergency_withdraw` — was documented in earlier drafts but was never implemented; removed from docs
+
 ## [0.1.0] - 2026-05-31
 
 ### Added
