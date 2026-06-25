@@ -196,6 +196,10 @@ impl TimeLockVault {
     ) -> Result<u32, VaultError> {
         depositor.require_auth();
 
+        if storage::is_paused(&env) {
+            return Err(VaultError::ContractPaused);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -212,6 +216,16 @@ impl TimeLockVault {
         let current_ledger = env.ledger().sequence();
         if unlock_ledger <= current_ledger {
             return Err(VaultError::UnlockTimeNotInFuture);
+        }
+
+        let lock_ledgers = unlock_ledger.saturating_sub(current_ledger);
+        let lock_seconds = (lock_ledgers as u64).saturating_mul(storage::LEDGER_SECONDS);
+        let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
+        if lock_seconds > max_lock {
+            return Err(VaultError::LockDurationTooLong);
+        }
+        if lock_seconds < MIN_LOCK_DURATION_SECS {
+            return Err(VaultError::LockDurationTooShort);
         }
 
         let deposit_id = storage::next_deposit_id(&env, &depositor);

@@ -12,7 +12,7 @@ use soroban_sdk::{
 use crate::{
     contract::{TimeLockVault, TimeLockVaultClient},
     errors::VaultError,
-    types::{VaultEntry, VaultKey, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
+    types::{VaultEntry, VaultKey, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
 };
 
 fn setup() -> (
@@ -1444,4 +1444,91 @@ fn test_full_lifecycle_deposit_withdraw_redeposit() {
     let new_id = vault.deposit(&alice, &token, &500, &new_unlock, &0);
     assert!(vault.get_vault(&alice, &new_id).is_some());
     assert_eq!(vault.get_vault(&alice, &new_id).unwrap().amount, 500);
+}
+
+// ================================================================
+//  deposit_by_ledger — pause and lock-duration validation (#issue)
+// ================================================================
+
+/// `deposit_by_ledger` must be rejected when the contract is paused.
+#[test]
+fn test_deposit_by_ledger_rejected_when_paused() {
+    use crate::storage::LEDGER_SECONDS;
+    let (env, vault, token, admin, alice, _fee) = setup();
+
+    vault.pause(&admin);
+
+    // unlock_ledger far enough in the future to normally pass duration checks
+    let min_ledgers = (MIN_LOCK_DURATION_SECS / LEDGER_SECONDS) as u32 + 1;
+    let unlock_ledger = env.ledger().sequence() + min_ledgers;
+
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::ContractPaused))
+    );
+}
+
+/// `deposit_by_ledger` must reject a lock duration shorter than `MIN_LOCK_DURATION_SECS`.
+#[test]
+fn test_deposit_by_ledger_lock_duration_too_short() {
+    use crate::storage::LEDGER_SECONDS;
+    let (env, vault, token, _admin, alice, _fee) = setup();
+
+    // 1 ledger = LEDGER_SECONDS < MIN_LOCK_DURATION_SECS (60 s)
+    let unlock_ledger = env.ledger().sequence() + 1;
+    assert!(
+        LEDGER_SECONDS < MIN_LOCK_DURATION_SECS,
+        "test precondition: 1 ledger must be shorter than MIN_LOCK_DURATION_SECS"
+    );
+
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooShort))
+    );
+}
+
+/// `deposit_by_ledger` must reject a lock duration longer than the configured maximum.
+#[test]
+fn test_deposit_by_ledger_lock_duration_too_long() {
+    use crate::storage::LEDGER_SECONDS;
+    let (env, vault, token, _admin, alice, _fee) = setup();
+
+    // Compute ledgers that exceed MAX_LOCK_DURATION_SECS.
+    let max_ledgers = (MAX_LOCK_DURATION_SECS / LEDGER_SECONDS) as u32;
+    let unlock_ledger = env.ledger().sequence() + max_ledgers + 1;
+
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooLong))
+    );
+}
+
+/// `deposit_by_ledger` succeeds at the minimum valid lock duration boundary.
+#[test]
+fn test_deposit_by_ledger_min_duration_boundary_succeeds() {
+    use crate::storage::LEDGER_SECONDS;
+    let (env, vault, token, _admin, alice, _fee) = setup();
+
+    // Smallest number of ledgers whose seconds >= MIN_LOCK_DURATION_SECS
+    let min_ledgers = ((MIN_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LEDGER_SECONDS) as u32;
+    let unlock_ledger = env.ledger().sequence() + min_ledgers;
+
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+    assert_eq!(id, 0);
+}
+
+/// `deposit_by_ledger` succeeds when unpaused after a pause.
+#[test]
+fn test_deposit_by_ledger_allowed_after_unpause() {
+    use crate::storage::LEDGER_SECONDS;
+    let (env, vault, token, admin, alice, _fee) = setup();
+
+    vault.pause(&admin);
+    vault.unpause(&admin);
+
+    let min_ledgers = ((MIN_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LEDGER_SECONDS) as u32;
+    let unlock_ledger = env.ledger().sequence() + min_ledgers;
+
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+    assert_eq!(id, 0);
 }
