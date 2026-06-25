@@ -40,6 +40,8 @@ pub enum VaultKey {
     MaxDeposit,
     /// Runtime-configurable max lock duration in seconds (overrides compile-time constant)
     MaxLockSecs,
+    /// Running total of locked token units per token contract address.
+    TotalLocked(Address),
 }
 
 // ----------------------------------------------------------------

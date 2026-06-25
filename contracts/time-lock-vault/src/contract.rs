@@ -112,6 +112,7 @@ impl TimeLockVault {
         };
         storage::set_deposit(&env, &depositor, &entry);
         storage::add_depositor(&env, &depositor);
+        storage::increase_total_locked(&env, &token, amount);
 
         events::deposit(&env, &depositor, &token, amount, unlock_time);
 
@@ -139,6 +140,7 @@ impl TimeLockVault {
         // Checks-Effects-Interactions
         storage::remove_deposit(&env, &depositor);
         storage::remove_depositor(&env, &depositor);
+        storage::decrease_total_locked(&env, &entry.token, entry.amount);
 
         let token_client = token::Client::new(&env, &entry.token);
         let contract = env.current_contract_address();
@@ -214,6 +216,7 @@ impl TimeLockVault {
         // Checks-Effects-Interactions: clear storage BEFORE external call
         storage::remove_deposit(&env, &depositor);
         storage::remove_depositor(&env, &depositor);
+        storage::decrease_total_locked(&env, &entry.token, entry.amount);
 
         let token_client = token::Client::new(&env, &entry.token);
         token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
@@ -249,6 +252,7 @@ impl TimeLockVault {
         // Checks-Effects-Interactions
         storage::remove_deposit(&env, &depositor);
         storage::remove_depositor(&env, &depositor);
+        storage::decrease_total_locked(&env, &entry.token, entry.amount);
 
         let token_client = token::Client::new(&env, &entry.token);
         token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
@@ -319,6 +323,7 @@ impl TimeLockVault {
             // Checks-Effects-Interactions: clear state before external token call.
             storage::remove_deposit(&env, &depositor);
             storage::remove_depositor(&env, &depositor);
+            storage::decrease_total_locked(&env, &entry.token, entry.amount);
 
             let token_client = token::Client::new(&env, &entry.token);
             token_client.transfer(&contract, &depositor, &entry.amount);
@@ -441,5 +446,14 @@ impl TimeLockVault {
 
     pub fn is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
+    }
+
+    // ----------------------------------------------------------------
+    //  Read-only: TVL query  (issue #329)
+    // ----------------------------------------------------------------
+
+    /// Returns the total amount of `token` currently locked across all depositors.
+    pub fn get_total_locked(env: Env, token: Address) -> i128 {
+        storage::get_total_locked(&env, &token)
     }
 }

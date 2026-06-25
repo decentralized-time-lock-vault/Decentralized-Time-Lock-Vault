@@ -276,3 +276,34 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     }
     page
 }
+
+// ----------------------------------------------------------------
+//  Total locked helpers (issue #329)
+// ----------------------------------------------------------------
+
+/// Adds `delta` to the running total locked for `token`.
+pub fn increase_total_locked(env: &Env, token: &Address, delta: i128) {
+    let key = VaultKey::TotalLocked(token.clone());
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &(current + delta));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+/// Subtracts `delta` from the running total locked for `token`, flooring at 0.
+pub fn decrease_total_locked(env: &Env, token: &Address, delta: i128) {
+    let key = VaultKey::TotalLocked(token.clone());
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    let next = if current > delta { current - delta } else { 0 };
+    env.storage().persistent().set(&key, &next);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+/// Returns the total amount currently locked for `token`.
+pub fn get_total_locked(env: &Env, token: &Address) -> i128 {
+    let key = VaultKey::TotalLocked(token.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
