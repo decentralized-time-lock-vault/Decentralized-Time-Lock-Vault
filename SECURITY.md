@@ -30,6 +30,22 @@ The following are considered in-scope vulnerabilities:
 - Re-entrancy or checks-effects-interactions violations
 - Admin privilege escalation
 
+## Pause Mechanism
+
+The contract includes an admin-controlled pause mechanism. When the admin calls `pause()`:
+
+- New `deposit` and `deposit_for` calls are blocked with `ContractPaused` (error 12)
+- All existing locked funds are **unaffected** — depositors can still call `withdraw`, `withdraw_to`, and `cancel_deposit` normally
+- The pause state is stored as `VaultKey::Paused` in persistent storage; absent means unpaused
+
+**Security considerations for integrators:**
+- Always check `is_paused()` before attempting a deposit in automation or off-chain tooling
+- Monitoring the `paused` and `unpaused` events allows indexers and UIs to reflect contract state without polling
+- Pause does not protect against a compromised admin — it is an operational safeguard, not a security boundary
+- If `renounce_admin()` has been called the contract can never be paused again; consider this before renouncing
+
+Pausing is **in-scope** for vulnerability reports if the mechanism can be bypassed or triggered by a non-admin caller.
+
 ## Out of Scope
 
 - Stellar network-level issues (report to [Stellar](https://www.stellar.org/bug-bounty-program))
