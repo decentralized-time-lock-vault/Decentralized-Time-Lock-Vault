@@ -3,11 +3,24 @@ use soroban_sdk::{Address, Env, Vec};
 use crate::constants::MAX_LOCK_DURATION_SECS;
 use crate::types::{LedgerVaultEntry, VaultEntry, VaultKey};
 
-// Number of seconds per ledger — Soroban ledgers are ~5 seconds apart.
+/// Approximate number of seconds between Soroban ledger closes (~5 s).
+/// Used to convert time durations into ledger counts for TTL calculations.
 pub const LEDGER_SECONDS: u64 = 5;
 
-// How many ledgers to extend TTL to cover the maximum allowed lock duration.
+/// Minimum remaining TTL (in ledgers) before a persistent entry is extended.
+///
+/// Value: 518 400 ledgers ≈ 30 days (518 400 × 5 s = 2 592 000 s).
+/// Any write operation that finds the remaining TTL below this threshold will
+/// extend it to [`BUMP_TARGET`]. Read-only query functions intentionally skip
+/// the bump to avoid charging callers extra storage fees.
 pub const BUMP_THRESHOLD: u32 = 518_400;
+
+/// Target TTL (in ledgers) that persistent entries are extended to on every write.
+///
+/// Derived as `ceil(MAX_LOCK_DURATION_SECS / LEDGER_SECONDS)` ≈ 31 557 600 ledgers
+/// (≈ 5.2 years at 5 s per ledger). This ensures that a deposit created at the
+/// maximum allowed lock duration (5 years) cannot expire from storage before its
+/// `unlock_time` is reached, even with no subsequent interaction.
 pub const BUMP_TARGET: u32 = ((MAX_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LEDGER_SECONDS) as u32;
 
 // ----------------------------------------------------------------
