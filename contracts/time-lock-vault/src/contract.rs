@@ -6,10 +6,10 @@
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
-    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
+    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, LEDGER_SECONDS},
     errors::VaultError,
     events, storage,
-    types::{VaultEntry, LedgerVaultEntry, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_BATCH_SIZE},
+    types::{VaultEntry, LedgerVaultEntry},
 };
 
 #[contract]
@@ -196,6 +196,11 @@ impl TimeLockVault {
     ) -> Result<u32, VaultError> {
         depositor.require_auth();
 
+        // Check pause state - required for contract safety
+        if storage::is_paused(&env) {
+            return Err(VaultError::ContractPaused);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -212,6 +217,23 @@ impl TimeLockVault {
         let current_ledger = env.ledger().sequence();
         if unlock_ledger <= current_ledger {
             return Err(VaultError::UnlockTimeNotInFuture);
+        }
+
+        // Validate lock duration in terms of seconds
+        // lock_ledgers = unlock_ledger - current_ledger
+        // lock_seconds = lock_ledgers * LEDGER_SECONDS
+        let lock_ledgers = unlock_ledger.saturating_sub(current_ledger) as u64;
+        let lock_seconds = lock_ledgers.saturating_mul(LEDGER_SECONDS);
+
+        // Check minimum lock duration
+        if lock_seconds < MIN_LOCK_DURATION_SECS {
+            return Err(VaultError::LockDurationTooShort);
+        }
+
+        // Check maximum lock duration
+        let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
+        if lock_seconds > max_lock {
+            return Err(VaultError::LockDurationTooLong);
         }
 
         let deposit_id = storage::next_deposit_id(&env, &depositor);
