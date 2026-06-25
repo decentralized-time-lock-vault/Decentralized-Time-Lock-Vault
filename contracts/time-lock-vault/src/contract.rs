@@ -5,8 +5,8 @@ use crate::{
     events,
     storage,
     types::{
-        VaultEntry, WithdrawResult, MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS,
-        MIN_LOCK_DURATION_SECS,
+        VaultEntry, VaultStatus, WithdrawResult, MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT,
+        MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS,
     },
 };
 
@@ -441,5 +441,34 @@ impl TimeLockVault {
 
     pub fn is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
+    }
+
+    // ----------------------------------------------------------------
+    //  Admin: Pause / Unpause  (issue #333)
+    // ----------------------------------------------------------------
+
+    /// Admin-only. Pauses or unpauses new deposits.
+    /// When paused, `deposit` calls will fail with `ContractPaused`.
+    pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+        storage::set_paused(&env, paused);
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    //  Read-only: Vault Status  (issue #333)
+    // ----------------------------------------------------------------
+
+    /// Returns a summary of the contract's current operational state:
+    /// admin address, pause status, and depositor count.
+    pub fn vault_status(env: Env) -> VaultStatus {
+        let admin = storage::get_admin(&env);
+        VaultStatus {
+            has_admin: admin.is_some(),
+            admin,
+            paused: storage::is_paused(&env),
+            depositor_count: storage::get_depositor_count(&env),
+        }
     }
 }
