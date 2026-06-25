@@ -25,4 +25,7 @@ pub enum VaultError {
 
     /// `batch_emergency_withdraw` was called with more than `MAX_BATCH_SIZE` depositors.
     BatchTooLarge = 12,
+
+    /// `deposit` was called with a token not in the admin-configured whitelist.
+    TokenNotWhitelisted = 14,
 }

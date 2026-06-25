@@ -40,6 +40,9 @@ pub enum VaultKey {
     MaxDeposit,
     /// Runtime-configurable max lock duration in seconds (overrides compile-time constant)
     MaxLockSecs,
+    /// Set of allowed token contract addresses for deposits (Vec<Address>).
+    /// When absent, all tokens are accepted; when present, only listed tokens are allowed.
+    TokenWhitelist,
 }
 
 // ----------------------------------------------------------------

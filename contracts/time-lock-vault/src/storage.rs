@@ -276,3 +276,66 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     }
     page
 }
+
+// ----------------------------------------------------------------
+//  Token whitelist helpers (issue #327)
+// ----------------------------------------------------------------
+
+fn get_whitelist(env: &Env) -> Vec<Address> {
+    env.storage()
+        .persistent()
+        .get(&VaultKey::TokenWhitelist)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+fn save_whitelist(env: &Env, list: &Vec<Address>) {
+    env.storage()
+        .persistent()
+        .set(&VaultKey::TokenWhitelist, list);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::TokenWhitelist, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+/// Adds `token` to the whitelist. No-op if already present.
+pub fn whitelist_add(env: &Env, token: &Address) {
+    let mut list = get_whitelist(env);
+    for t in list.iter() {
+        if &t == token {
+            return;
+        }
+    }
+    list.push_back(token.clone());
+    save_whitelist(env, &list);
+}
+
+/// Removes `token` from the whitelist. No-op if not present.
+pub fn whitelist_remove(env: &Env, token: &Address) {
+    let list = get_whitelist(env);
+    let mut new_list: Vec<Address> = Vec::new(env);
+    for t in list.iter() {
+        if &t != token {
+            new_list.push_back(t);
+        }
+    }
+    save_whitelist(env, &new_list);
+}
+
+/// Returns `true` if the whitelist is empty (all tokens accepted) or `token` is in the list.
+pub fn whitelist_allows(env: &Env, token: &Address) -> bool {
+    let list = get_whitelist(env);
+    if list.is_empty() {
+        return true;
+    }
+    for t in list.iter() {
+        if &t == token {
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns the current whitelist. Empty means all tokens are accepted.
+pub fn get_whitelist_entries(env: &Env) -> Vec<Address> {
+    get_whitelist(env)
+}

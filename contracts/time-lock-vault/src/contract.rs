@@ -442,4 +442,40 @@ impl TimeLockVault {
     pub fn is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
     }
+
+    // ----------------------------------------------------------------
+    //  Admin: Token Whitelist  (issue #327)
+    // ----------------------------------------------------------------
+
+    /// Admin-only. Adds `token` to the deposit whitelist.
+    /// Once any token is added, only whitelisted tokens can be deposited.
+    pub fn add_to_whitelist(env: Env, admin: Address, token: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+        storage::whitelist_add(&env, &token);
+        Ok(())
+    }
+
+    /// Admin-only. Removes `token` from the deposit whitelist.
+    pub fn remove_from_whitelist(
+        env: Env,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+        storage::whitelist_remove(&env, &token);
+        Ok(())
+    }
+
+    /// Returns `true` if `token` is allowed for deposits.
+    /// An empty whitelist means all tokens are accepted.
+    pub fn is_whitelisted(env: Env, token: Address) -> bool {
+        storage::whitelist_allows(&env, &token)
+    }
+
+    /// Returns the full whitelist. An empty list means all tokens are accepted.
+    pub fn get_whitelist(env: Env) -> Vec<Address> {
+        storage::get_whitelist_entries(&env)
+    }
 }
