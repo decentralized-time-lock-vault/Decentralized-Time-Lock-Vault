@@ -2,7 +2,22 @@
 //  Protocol Constants
 // ----------------------------------------------------------------
 
-/// Maximum deposit amount (in stroops or token base units).
+/// Maximum deposit amount expressed in the token's **base units** (the smallest
+/// indivisible denomination — e.g. stroops for XLM, or the equivalent for any
+/// SEP-41 token).
+///
+/// Value: `1_000_000_000_000_000` = 10^15
+///
+/// Scale note: this is **one quadrillion** in the short scale (used in the US,
+/// UK since 1974, and most English-speaking countries) — i.e. 10^15. In the
+/// long scale (historically used in parts of continental Europe) the same number
+/// is called *one billiard*. All documentation in this project uses the
+/// **short-scale** convention.
+///
+/// XLM context: XLM has 7 decimal places, so 1 XLM = 10 000 000 stroops.
+/// The cap therefore represents 10^15 / 10^7 = **100 000 000 XLM** (100 million
+/// XLM) as the maximum single deposit. For tokens with different decimal
+/// precision the effective whole-token cap scales accordingly.
 pub const MAX_DEPOSIT_AMOUNT: i128 = 1_000_000_000_000_000;
 
 /// Maximum lock duration in seconds (~5 years).
