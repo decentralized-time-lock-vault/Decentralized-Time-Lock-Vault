@@ -235,6 +235,42 @@ impl TimeLockVault {
     }
 
     // ----------------------------------------------------------------
+    //  Core: Top Up (increase locked amount, unlock_time unchanged)
+    // ----------------------------------------------------------------
+
+    pub fn top_up(
+        env: Env,
+        depositor: Address,
+        deposit_id: u32,
+        amount: i128,
+    ) -> Result<i128, VaultError> {
+        depositor.require_auth();
+
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
+
+        let max_deposit = storage::get_max_deposit(&env).unwrap_or(MAX_DEPOSIT_AMOUNT);
+
+        let mut entry = storage::get_deposit(&env, &depositor, deposit_id)
+            .ok_or(VaultError::NoDepositFound)?;
+
+        let new_total = entry.amount.checked_add(amount).ok_or(VaultError::AmountTooLarge)?;
+        if new_total > max_deposit {
+            return Err(VaultError::AmountTooLarge);
+        }
+
+        let token_client = token::Client::new(&env, &entry.token);
+        token_client.transfer(&depositor, &env.current_contract_address(), &amount);
+
+        entry.amount = new_total;
+        storage::set_deposit(&env, &depositor, deposit_id, &entry);
+
+        events::top_up(&env, &depositor, deposit_id, &entry.token, amount, new_total);
+        Ok(new_total)
+    }
+
+    // ----------------------------------------------------------------
     //  Core: Cancel Deposit (early exit with penalty)
     // ----------------------------------------------------------------
 

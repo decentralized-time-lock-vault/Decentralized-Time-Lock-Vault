@@ -141,6 +141,19 @@ Locks `amount` of `token` until `unlock_time` (Unix seconds).
 | `unlock_time` | `u64` | `now < unlock_time â‰¤ now + 5 years` |
 | `penalty_bps` | `u32` | `0â€“10000` (basis points for early-exit penalty) |
 
+#### `top_up(depositor, deposit_id, amount) → i128`
+Increases the locked amount of an existing deposit without changing its unlock time. The caller must own the deposit. Tokens are transferred from the depositor to the contract immediately.
+
+| Param | Type | Constraint |
+|---|---|---|
+| `depositor` | `Address` | Must sign; must own the deposit |
+| `deposit_id` | `u32` | ID of the active deposit to top up |
+| `amount` | `i128` | `amount > 0`; `existing_amount + amount ≤ MAX_DEPOSIT` |
+
+Returns the new total locked amount. Emits a `top_up` event.
+
+Fails with `InvalidAmount` if `amount ≤ 0`, `NoDepositFound` if no deposit exists, or `AmountTooLarge` if the new total would exceed the configured `MAX_DEPOSIT_AMOUNT`.
+
 #### `cancel_deposit(depositor)`
 Cancels an active deposit before the unlock time. The penalty (`penalty_bps` set at deposit time) is sent to the `fee_recipient`; the remainder is returned to the depositor. Fails with `FundsStillLocked` if the vault is already past its unlock time (use `withdraw` instead).
 
@@ -235,6 +248,7 @@ All events are emitted via `env.events().publish(topics, data)`.
 | Event | Topics | Data |
 |---|---|---|
 | `deposit` | `("deposit", depositor, token)` | `(deposit_id, amount, unlock_time)` |
+| `top_up` | `("top_up", depositor, token)` | `(deposit_id, added, new_total)` |
 | `withdraw` | `("withdraw", depositor, token)` | `(deposit_id, amount)` |
 | `emrg_wdraw` | `("emrg_wdraw", depositor)` | `(deposit_id, admin, token, amount)` |
 | `dep_cancel` | `("dep_cancel", depositor, token)` | `(amount, penalty)` |

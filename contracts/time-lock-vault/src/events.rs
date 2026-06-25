@@ -54,6 +54,11 @@ pub fn lock_extended(
     env.events().publish(topics, (old_unlock_time, new_unlock_time));
 }
 
+pub fn top_up(env: &Env, depositor: &Address, deposit_id: u32, token: &Address, added: i128, new_total: i128) {
+    let topics = (Symbol::new(env, "top_up"), depositor.clone(), token.clone());
+    env.events().publish(topics, (deposit_id, added, new_total));
+}
+
 pub fn deposit_cancelled(
     env: &Env,
     depositor: &Address,

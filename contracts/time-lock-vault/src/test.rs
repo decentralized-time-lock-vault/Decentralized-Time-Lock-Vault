@@ -1445,3 +1445,106 @@ fn test_full_lifecycle_deposit_withdraw_redeposit() {
     assert!(vault.get_vault(&alice, &new_id).is_some());
     assert_eq!(vault.get_vault(&alice, &new_id).unwrap().amount, 500);
 }
+
+// ================================================================
+//  Top Up
+// ================================================================
+
+#[test]
+fn test_top_up_increases_amount() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    let new_total = vault.top_up(&alice, &0, &500);
+    assert_eq!(new_total, 1_500);
+    assert_eq!(vault.get_vault(&alice, &0).unwrap().amount, 1_500);
+}
+
+#[test]
+fn test_top_up_does_not_change_unlock_time() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.top_up(&alice, &0, &200);
+    assert_eq!(vault.get_vault(&alice, &0).unwrap().unlock_time, unlock_time);
+}
+
+#[test]
+fn test_top_up_transfers_tokens_from_depositor() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let token_client = TokenClient::new(&env, &token);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.top_up(&alice, &0, &500);
+    // alice started with 10_000; deposited 1_000; topped up 500 → 8_500 left
+    assert_eq!(token_client.balance(&alice), 8_500);
+}
+
+#[test]
+fn test_top_up_zero_amount_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    assert_eq!(
+        vault.try_top_up(&alice, &0, &0),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_top_up_negative_amount_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    assert_eq!(
+        vault.try_top_up(&alice, &0, &-1),
+        Err(Ok(VaultError::InvalidAmount))
+    );
+}
+
+#[test]
+fn test_top_up_no_deposit_fails() {
+    let (_env, vault, _token, _admin, alice, _fee) = setup();
+    assert_eq!(
+        vault.try_top_up(&alice, &0, &500),
+        Err(Ok(VaultError::NoDepositFound))
+    );
+}
+
+#[test]
+fn test_top_up_exceeds_max_deposit_fails() {
+    let (env, vault, token, _admin, alice) = setup_with_limits(Some(1_000), None);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    assert_eq!(
+        vault.try_top_up(&alice, &0, &1),
+        Err(Ok(VaultError::AmountTooLarge))
+    );
+}
+
+#[test]
+fn test_top_up_emits_event() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.top_up(&alice, &0, &500);
+    let events = env.events().all();
+    let last = events.last().unwrap();
+    assert_eq!(
+        last,
+        (
+            vault.address.clone(),
+            (Symbol::new(&env, "top_up"), alice.clone(), token.clone()).into_val(&env),
+            (0_u32, 500_i128, 1_500_i128).into_val(&env),
+        )
+    );
+}
+
+#[test]
+fn test_top_up_auth_requires_depositor() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.top_up(&alice, &0, &200);
+    assert_eq!(env.auths()[0].0, alice);
+}
