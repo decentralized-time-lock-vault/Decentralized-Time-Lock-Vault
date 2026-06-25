@@ -36,8 +36,8 @@ fmt-check:
 lint:
 	cargo clippy --all-targets --features testutils -- -D warnings
 
-## Run fmt-check + lint + test + audit + deny in sequence (mirrors CI)
-check: fmt-check lint test audit deny
+## Run fmt-check + lint + test + build + audit + deny in sequence (mirrors CI)
+check: fmt-check lint test build audit deny
 
 ## Check dependencies for known security vulnerabilities
 audit:
