@@ -7,6 +7,9 @@ use crate::{
     types::{LedgerVaultEntry, VaultEntry, WithdrawResult},
 };
 
+/// Maximum addresses returned per `get_depositors` page.
+pub const MAX_DEPOSITORS_PAGE_SIZE: u32 = 100;
+
 #[contract]
 pub struct TimeLockVault;
 
@@ -557,10 +560,7 @@ impl TimeLockVault {
 
     pub fn pause(env: Env, admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
         storage::set_paused(&env, true);
         events::paused(&env, &admin);
         Ok(())
@@ -568,10 +568,7 @@ impl TimeLockVault {
 
     pub fn unpause(env: Env, admin: Address) -> Result<(), VaultError> {
         admin.require_auth();
-        let stored_admin = storage::get_admin(&env).ok_or(VaultError::Unauthorized)?;
-        if admin != stored_admin {
-            return Err(VaultError::Unauthorized);
-        }
+        storage::require_admin(&env, &admin)?;
         storage::set_paused(&env, false);
         events::unpaused(&env, &admin);
         Ok(())
@@ -755,10 +752,7 @@ impl TimeLockVault {
     pub fn ledgers_remaining(env: Env, depositor: Address, deposit_id: u32) -> u32 {
         match storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
             None => 0,
-            Some(entry) => {
-                let current = env.ledger().sequence();
-                entry.unlock_ledger.saturating_sub(current)
-            }
+            Some(entry) => entry.unlock_ledger.saturating_sub(env.ledger().sequence()),
         }
     }
 
@@ -767,8 +761,7 @@ impl TimeLockVault {
         let mut results = Vec::new(&env);
         for i in 0..limit {
             if let Some(depositor) = depositors.get(i) {
-                let entry = storage::get_deposit_readonly(&env, &depositor, deposit_id);
-                results.push_back(entry);
+                results.push_back(storage::get_deposit_readonly(&env, &depositor, deposit_id));
             }
         }
         results
@@ -817,9 +810,10 @@ impl TimeLockVault {
         storage::get_depositor_count(&env)
     }
 
+    /// Returns a paginated slice of active depositor addresses.
+    /// `limit` is capped at `MAX_DEPOSITORS_PAGE_SIZE` (100).
     pub fn get_depositors(env: Env, offset: u32, limit: u32) -> Vec<Address> {
-        const MAX_PAGE_SIZE: u32 = 100;
-        storage::get_depositors_page(&env, offset, limit.min(MAX_PAGE_SIZE))
+        storage::get_depositors_page(&env, offset, limit.min(MAX_DEPOSITORS_PAGE_SIZE))
     }
 
     pub fn is_initialized(env: Env) -> bool {
