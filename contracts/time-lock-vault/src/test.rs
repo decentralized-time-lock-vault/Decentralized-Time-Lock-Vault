@@ -91,44 +91,46 @@ fn test_double_initialize_fails() {
     assert_eq!(result, Err(Ok(VaultError::Unauthorized)));
 }
 
-    let unlock_time_1 = env.ledger().timestamp() + 3600;
-    let unlock_time_2 = env.ledger().timestamp() + 7200;
-
+#[test]
+fn test_is_initialized_flag() {
+    let env = Env::default();
+    env.mock_all_auths();
     let vault_id = env.register(TimeLockVault, ());
     let vault = TimeLockVaultClient::new(&env, &vault_id);
     let admin: Address = Address::generate(&env);
     let fee: Address = Address::generate(&env);
-
     assert!(!vault.is_initialized());
     vault.initialize(&admin, &fee, &None, &None);
     assert!(vault.is_initialized());
-
-    vault.withdraw(&alice, &first_id).unwrap();
-    assert_eq!(vault.get_deposit_ids(&alice), vec![1_u32]);
 }
 
+/// get_depositors page is hard-capped at MAX_DEPOSITORS_PAGE_SIZE even when limit > MAX_DEPOSITORS_PAGE_SIZE.
 #[test]
-fn test_depositor_pagination_is_capped_to_a_reasonable_page_size() {
-    let (env, vault, token, _admin, alice, _fee) = setup();
-    let unlock_time = env.ledger().timestamp() + 3600;
-    let id = vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
-
+fn test_depositor_pagination_is_capped_to_max_page_size() {
+    use crate::contract::MAX_DEPOSITORS_PAGE_SIZE;
+    let (env, vault, token, _admin, _alice, _fee) = setup();
+    // Register MAX_DEPOSITORS_PAGE_SIZE + 5 depositors
     for i in 0..(MAX_DEPOSITORS_PAGE_SIZE + 5) {
         let depositor = Address::generate(&env);
         StellarAssetClient::new(&env, &token).mint(&depositor, &10_000);
         let unlock_time = env.ledger().timestamp() + 3600 + i as u64;
-        vault.deposit(&depositor, &token, &100, &unlock_time, &0).unwrap();
+        vault.deposit(&depositor, &token, &100, &unlock_time, &0);
     }
-
+    assert_eq!(vault.get_depositor_count(), MAX_DEPOSITORS_PAGE_SIZE + 5);
+    // Requesting more than the cap returns at most MAX_DEPOSITORS_PAGE_SIZE entries
+    let page = vault.get_depositors(&0, &(MAX_DEPOSITORS_PAGE_SIZE + 50));
+    assert_eq!(page.len(), MAX_DEPOSITORS_PAGE_SIZE);
 }
 
 #[test]
 fn test_short_lock_durations_are_rejected() {
     let (env, vault, token, _admin, alice, _fee) = setup();
-    let token_client = TokenClient::new(&env, &token);
-    let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
-    assert_eq!(token_client.balance(&alice), 9_000);
+    // 10 seconds < MIN_LOCK_DURATION_SECS (60 s) — must be rejected
+    let unlock_time = env.ledger().timestamp() + 10;
+    assert_eq!(
+        vault.try_deposit(&alice, &token, &1_000, &unlock_time, &0),
+        Err(Ok(VaultError::LockDurationTooShort))
+    );
 }
 
 #[test]
@@ -165,6 +167,7 @@ fn test_deposit_amount_exceeds_max_fails() {
 #[test]
 fn test_deposit_rejects_too_large_amounts_and_invalid_penalty_bps() {
     let (env, vault, token, _admin, alice, _fee) = setup();
+    StellarAssetClient::new(&env, &token).mint(&alice, &MAX_DEPOSIT_AMOUNT);
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &MAX_DEPOSIT_AMOUNT, &unlock_time, &0);
     let entry = vault.get_vault(&alice, &0).expect("entry should exist");
@@ -240,10 +243,8 @@ fn test_multiple_deposits_same_address() {
     assert_eq!(id1, 1);
     assert_eq!(id2, 2);
 
-    vault.cancel_deposit(&alice, &deposit_id).unwrap();
-    assert!(vault.get_vault(&alice, &deposit_id).is_none());
-    assert_eq!(vault.get_deposit_ids(&alice), Vec::<u32>::new(&env));
-    assert_eq!(vault.get_fee_recipient(), Some(fee_recipient));
+    let ids = vault.get_deposit_ids(&alice);
+    assert_eq!(ids.len(), 3);
 }
 
 #[test]
@@ -1688,19 +1689,6 @@ fn test_has_any_deposit_with_multiple_deposits_one_remaining() {
 // ================================================================
 //  deposit_by_ledger — pause, duration bounds, query, lifecycle
 // ================================================================
-
-fn advance_ledger(env: &Env, ledgers: u32) {
-    env.ledger().set(LedgerInfo {
-        timestamp: env.ledger().timestamp(),
-        protocol_version: env.ledger().protocol_version(),
-        sequence_number: env.ledger().sequence() + ledgers,
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 16,
-        min_persistent_entry_ttl: 4096,
-        max_entry_ttl: 33_000_000,
-    });
-}
 
 /// Pause check: deposit_by_ledger must fail when contract is paused.
 #[test]

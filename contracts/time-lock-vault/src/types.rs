@@ -6,20 +6,21 @@ pub enum VaultKey {
     Deposit(Address, u32),
     DepositByLedger(Address, u32),
     DepositCounter(Address),
-    /// Tracks the set of active deposit IDs for a depositor (replaces the
-    /// O(counter) scan in the old implementation).
+    /// Tracks the set of active deposit IDs for a depositor.
     ActiveDepositIds(Address),
     Admin,
     PendingAdmin,
     Initialized,
-    DepositorList,
-    /// Per-depositor membership flag — enables O(1) duplicate check in
-    /// `add_depositor` without scanning the full `DepositorList`.
-    DepositorMember(Address),
     FeeRecipient,
     MaxDeposit,
     MaxLockSecs,
     Paused,
+    /// Total number of unique depositors in the global index.
+    DepositorCount,
+    /// Address stored at slot `i` in the global depositor array.
+    DepositorAt(u32),
+    /// Slot index for a given depositor address — enables O(1) swap-remove.
+    DepositorIndex(Address),
 }
 
 /// Persistent record of a time-locked deposit keyed by Unix timestamp.
