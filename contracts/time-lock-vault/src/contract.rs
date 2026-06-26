@@ -1,14 +1,7 @@
-// ============================================================
-//  Time-Lock Vault — Soroban Smart Contract
-//  Stellar Blockchain | Soroban SDK v22
-// ============================================================
-
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
-    constants::{
-        MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS,
-    },
+    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
     errors::VaultError,
     events, storage,
     types::{LedgerVaultEntry, VaultEntry, WithdrawResult},
@@ -78,6 +71,10 @@ impl TimeLockVault {
             return Err(VaultError::ContractPaused);
         }
 
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -101,6 +98,10 @@ impl TimeLockVault {
         if lock_duration > max_lock {
             return Err(VaultError::LockDurationTooLong);
         }
+
+        // --- Duplicate deposit guard (single read, no TTL bump) ---
+        if storage::get_deposit_readonly(&env, &depositor).is_some() {
+            return Err(VaultError::DepositAlreadyExists);
         if lock_duration < MIN_LOCK_DURATION_SECS {
             return Err(VaultError::LockDurationTooShort);
         }
@@ -205,6 +206,10 @@ impl TimeLockVault {
             return Err(VaultError::ContractPaused);
         }
 
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -223,7 +228,7 @@ impl TimeLockVault {
             return Err(VaultError::UnlockTimeNotInFuture);
         }
 
-        let lock_ledgers = unlock_ledger - current_ledger;
+        let lock_ledgers = unlock_ledger.saturating_sub(current_ledger);
         let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
         let max_lock_ledgers = (max_lock / storage::LEDGER_SECONDS) as u32;
         if lock_ledgers > max_lock_ledgers {
@@ -261,42 +266,78 @@ impl TimeLockVault {
     pub fn cancel_deposit(env: Env, depositor: Address, deposit_id: u32) -> Result<(), VaultError> {
         depositor.require_auth();
 
-        let entry =
-            storage::get_deposit(&env, &depositor, deposit_id).ok_or(VaultError::NoDepositFound)?;
+        // Try timestamp-based deposit first
+        if let Some(entry) = storage::get_deposit(&env, &depositor, deposit_id) {
+            let now = env.ledger().timestamp();
+            if now >= entry.unlock_time {
+                return Err(VaultError::FundsAlreadyUnlocked);
+            }
 
-        let now = env.ledger().timestamp();
-        if now >= entry.unlock_time {
-            return Err(VaultError::FundsAlreadyUnlocked);
+            storage::remove_deposit(&env, &depositor, deposit_id);
+            if !storage::has_any_deposit(&env, &depositor) {
+                storage::remove_depositor(&env, &depositor);
+            }
+
+            let token_client = token::Client::new(&env, &entry.token);
+            let contract = env.current_contract_address();
+
+            let penalty: i128 = (entry.amount * entry.penalty_bps as i128) / 10_000;
+            let refund = entry.amount - penalty;
+
+            if penalty > 0 {
+                let fee_recipient =
+                    storage::get_fee_recipient(&env).unwrap_or_else(|| depositor.clone());
+                token_client.transfer(&contract, &fee_recipient, &penalty);
+            }
+            if refund > 0 {
+                token_client.transfer(&contract, &depositor, &refund);
+            }
+
+            events::deposit_cancelled(&env, &depositor, &entry.token, entry.amount, penalty);
+            return Ok(());
         }
 
-        storage::remove_deposit(&env, &depositor, deposit_id);
-        if !storage::has_any_deposit(&env, &depositor) {
-            storage::remove_depositor(&env, &depositor);
+        // Try ledger-based deposit
+        if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
+            let current_ledger = env.ledger().sequence();
+            if current_ledger >= entry.unlock_ledger {
+                return Err(VaultError::FundsAlreadyUnlocked);
+            }
+
+            storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
+            if !storage::has_any_deposit(&env, &depositor) {
+                storage::remove_depositor(&env, &depositor);
+            }
+
+            let token_client = token::Client::new(&env, &entry.token);
+            let contract = env.current_contract_address();
+
+            let penalty: i128 = (entry.amount * entry.penalty_bps as i128) / 10_000;
+            let refund = entry.amount - penalty;
+
+            if penalty > 0 {
+                let fee_recipient =
+                    storage::get_fee_recipient(&env).unwrap_or_else(|| depositor.clone());
+                token_client.transfer(&contract, &fee_recipient, &penalty);
+            }
+            if refund > 0 {
+                token_client.transfer(&contract, &depositor, &refund);
+            }
+
+            events::deposit_cancelled(&env, &depositor, &entry.token, entry.amount, penalty);
+            return Ok(());
         }
 
-        let token_client = token::Client::new(&env, &entry.token);
-        let contract = env.current_contract_address();
-
-        let penalty: i128 = (entry.amount * entry.penalty_bps as i128) / 10_000;
-        let refund = entry.amount - penalty;
-
-        if penalty > 0 {
-            let fee_recipient =
-                storage::get_fee_recipient(&env).unwrap_or_else(|| depositor.clone());
-            token_client.transfer(&contract, &fee_recipient, &penalty);
-        }
-        if refund > 0 {
-            token_client.transfer(&contract, &depositor, &refund);
-        }
-
-        events::deposit_cancelled(&env, &depositor, &entry.token, entry.amount, penalty);
-        Ok(())
+        Err(VaultError::NoDepositFound)
     }
 
     pub fn withdraw(env: Env, depositor: Address, deposit_id: u32) -> Result<(), VaultError> {
         depositor.require_auth();
 
-        // Try timestamp-based deposit first
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
+
         if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {
             let now = env.ledger().timestamp();
             if now < entry.unlock_time {
@@ -315,7 +356,6 @@ impl TimeLockVault {
             return Ok(());
         }
 
-        // Try ledger-based deposit
         if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
             let current_ledger = env.ledger().sequence();
             if current_ledger < entry.unlock_ledger {
@@ -345,7 +385,10 @@ impl TimeLockVault {
     ) -> Result<(), VaultError> {
         depositor.require_auth();
 
-        // Try timestamp-based deposit first
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
+
         if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {
             let now = env.ledger().timestamp();
             if now < entry.unlock_time {
@@ -364,7 +407,6 @@ impl TimeLockVault {
             return Ok(());
         }
 
-        // Try ledger-based deposit
         if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
             let current_ledger = env.ledger().sequence();
             if current_ledger < entry.unlock_ledger {
@@ -395,7 +437,6 @@ impl TimeLockVault {
         admin.require_auth();
         storage::require_admin(&env, &admin)?;
 
-        // Try timestamp-based deposit first, then ledger-based.
         if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {
             storage::remove_deposit(&env, &depositor, deposit_id);
             if !storage::has_any_deposit(&env, &depositor) {
@@ -407,6 +448,9 @@ impl TimeLockVault {
             return Ok(());
         }
 
+        // --- Load deposit (no TTL bump — entry is about to be removed) ---
+        let entry = storage::get_deposit_readonly(&env, &depositor)
+            .ok_or(VaultError::NoDepositFound)?;
         if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
             storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
             if !storage::has_any_deposit(&env, &depositor) {
@@ -421,9 +465,6 @@ impl TimeLockVault {
         Err(VaultError::NoDepositFound)
     }
 
-    /// Batch emergency withdrawal — processes multiple depositors in one call.
-    /// Best-effort: depositors with no active deposit are skipped (success=false).
-    /// Admin signs once for the entire batch. Max `MAX_BATCH_SIZE` entries.
     pub fn batch_emergency_withdraw(
         env: Env,
         admin: Address,
@@ -440,43 +481,74 @@ impl TimeLockVault {
 
         for item in depositors.iter() {
             let (depositor, deposit_id) = item;
-            match storage::get_deposit_readonly(&env, &depositor, deposit_id) {
-                None => {
-                    results.push_back(WithdrawResult {
-                        depositor,
-                        deposit_id,
-                        success: false,
-                    });
+
+            // Try timestamp-based deposit first
+            if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {
+                storage::remove_deposit(&env, &depositor, deposit_id);
+                if !storage::has_any_deposit(&env, &depositor) {
+                    storage::remove_depositor(&env, &depositor);
                 }
-                Some(entry) => {
-                    storage::remove_deposit(&env, &depositor, deposit_id);
-                    if !storage::has_any_deposit(&env, &depositor) {
-                        storage::remove_depositor(&env, &depositor);
-                    }
 
-                    let token_client = token::Client::new(&env, &entry.token);
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &depositor,
-                        &entry.amount,
-                    );
+                let token_client = token::Client::new(&env, &entry.token);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &depositor,
+                    &entry.amount,
+                );
 
-                    events::emergency_withdraw(
-                        &env,
-                        &admin,
-                        &depositor,
-                        &entry.token,
-                        deposit_id,
-                        entry.amount,
-                    );
+                events::emergency_withdraw(
+                    &env,
+                    &admin,
+                    &depositor,
+                    &entry.token,
+                    deposit_id,
+                    entry.amount,
+                );
 
-                    results.push_back(WithdrawResult {
-                        depositor,
-                        deposit_id,
-                        success: true,
-                    });
-                }
+                results.push_back(WithdrawResult {
+                    depositor,
+                    deposit_id,
+                    success: true,
+                });
+                continue;
             }
+
+            // Try ledger-based deposit
+            if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
+                storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
+                if !storage::has_any_deposit(&env, &depositor) {
+                    storage::remove_depositor(&env, &depositor);
+                }
+
+                let token_client = token::Client::new(&env, &entry.token);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &depositor,
+                    &entry.amount,
+                );
+
+                events::emergency_withdraw(
+                    &env,
+                    &admin,
+                    &depositor,
+                    &entry.token,
+                    deposit_id,
+                    entry.amount,
+                );
+
+                results.push_back(WithdrawResult {
+                    depositor,
+                    deposit_id,
+                    success: true,
+                });
+                continue;
+            }
+
+            results.push_back(WithdrawResult {
+                depositor,
+                deposit_id,
+                success: false,
+            });
         }
 
         Ok(results)
@@ -570,6 +642,102 @@ impl TimeLockVault {
     }
 
     // ----------------------------------------------------------------
+    //  Admin: Migration
+    // ----------------------------------------------------------------
+
+    pub fn migrate_deposit_to_ledger(
+        env: Env,
+        admin: Address,
+        depositor: Address,
+        deposit_id: u32,
+        new_unlock_ledger: u32,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+
+        let entry = storage::get_deposit(&env, &depositor, deposit_id)
+            .ok_or(VaultError::NoDepositFound)?;
+
+        let current_ledger = env.ledger().sequence();
+        if new_unlock_ledger <= current_ledger {
+            return Err(VaultError::UnlockTimeNotInFuture);
+        }
+
+        let ledger_entry = LedgerVaultEntry {
+            token: entry.token.clone(),
+            amount: entry.amount,
+            unlock_ledger: new_unlock_ledger,
+            depositor: entry.depositor.clone(),
+            penalty_bps: entry.penalty_bps,
+        };
+
+        storage::remove_deposit(&env, &depositor, deposit_id);
+        storage::set_deposit_by_ledger(&env, &depositor, deposit_id, &ledger_entry);
+
+        events::migrated(&env, &depositor, deposit_id, true, false);
+        Ok(())
+    }
+
+    pub fn migrate_deposit_to_time(
+        env: Env,
+        admin: Address,
+        depositor: Address,
+        deposit_id: u32,
+        new_unlock_time: u64,
+    ) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+
+        let entry = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id)
+            .ok_or(VaultError::NoDepositFound)?;
+
+        let now = env.ledger().timestamp();
+        if new_unlock_time <= now {
+            return Err(VaultError::UnlockTimeNotInFuture);
+        }
+
+        let time_entry = VaultEntry {
+            token: entry.token.clone(),
+            amount: entry.amount,
+            unlock_time: new_unlock_time,
+            depositor: entry.depositor.clone(),
+            penalty_bps: entry.penalty_bps,
+        };
+
+        storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
+        storage::set_deposit(&env, &depositor, deposit_id, &time_entry);
+
+        events::migrated(&env, &depositor, deposit_id, false, true);
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    //  Admin: Freeze / Unfreeze
+    // ----------------------------------------------------------------
+
+    pub fn freeze_depositor(env: Env, admin: Address, depositor: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+
+        storage::set_frozen(&env, &depositor);
+        events::frozen(&env, &admin, &depositor);
+        Ok(())
+    }
+
+    pub fn unfreeze_depositor(env: Env, admin: Address, depositor: Address) -> Result<(), VaultError> {
+        admin.require_auth();
+        storage::require_admin(&env, &admin)?;
+
+        storage::remove_frozen(&env, &depositor);
+        events::unfrozen(&env, &admin, &depositor);
+        Ok(())
+    }
+
+    pub fn is_depositor_frozen(env: Env, depositor: Address) -> bool {
+        storage::is_frozen(&env, &depositor)
+    }
+
+    // ----------------------------------------------------------------
     //  Read-only Queries
     // ----------------------------------------------------------------
 
@@ -608,10 +776,16 @@ impl TimeLockVault {
     }
 
     pub fn time_remaining(env: Env, depositor: Address, deposit_id: u32) -> u64 {
-        match storage::get_deposit_readonly(&env, &depositor, deposit_id) {
-            None => 0,
-            Some(entry) => entry.unlock_time.saturating_sub(env.ledger().timestamp()),
+        // Try timestamp-based deposit first
+        if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {
+            return entry.unlock_time.saturating_sub(env.ledger().timestamp());
         }
+        // Try ledger-based deposit
+        if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
+            let remaining_ledgers = entry.unlock_ledger.saturating_sub(env.ledger().sequence());
+            return (remaining_ledgers as u64).saturating_mul(storage::LEDGER_SECONDS);
+        }
+        0
     }
 
     pub fn get_admin(env: Env) -> Option<Address> {

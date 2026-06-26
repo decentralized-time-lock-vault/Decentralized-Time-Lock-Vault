@@ -86,11 +86,43 @@ pub fn lock_extended(
 }
 
 pub fn paused(env: &Env, admin: &Address) {
-    let topics = (Symbol::new(env, "paused"), admin.clone());
+    let topics = (symbol_short!("paused"), admin.clone());
     env.events().publish(topics, ());
 }
 
 pub fn unpaused(env: &Env, admin: &Address) {
-    let topics = (Symbol::new(env, "unpaused"), admin.clone());
+    let topics = (symbol_short!("unpaused"), admin.clone());
     env.events().publish(topics, ());
+}
+
+pub fn withdraw_to(
+    env: &Env,
+    depositor: &Address,
+    recipient: &Address,
+    token: &Address,
+    deposit_id: u32,
+    amount: i128,
+) {
+    let topics = (
+        Symbol::new(env, "withdraw_to"),
+        depositor.clone(),
+        recipient.clone(),
+        token.clone(),
+    );
+    env.events().publish(topics, (deposit_id, amount));
+}
+
+pub fn deposit_cancelled(
+    env: &Env,
+    depositor: &Address,
+    token: &Address,
+    amount: i128,
+    penalty: i128,
+) {
+    let topics = (
+        Symbol::new(env, "dep_cancel"),
+        depositor.clone(),
+        token.clone(),
+    );
+    env.events().publish(topics, (amount, penalty));
 }
