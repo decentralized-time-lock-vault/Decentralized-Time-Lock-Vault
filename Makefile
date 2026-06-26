@@ -7,7 +7,7 @@ WASM_OUT     := target/wasm32-unknown-unknown/release/time_lock_vault.wasm
 OPTIMIZED    := target/time_lock_vault.optimized.wasm
 
 .PHONY: all build test fmt lint clean optimize deploy-testnet size check audit deny
-.PHONY: all build test fmt lint clean optimize deploy-testnet size check doc smoke-test-local
+.PHONY: all build test watch fmt lint clean optimize deploy-testnet size check doc smoke-test-local
 
 ## Default: lint + test
 all: lint test
@@ -19,6 +19,10 @@ build:
 ## Run all unit tests (native, no WASM needed)
 test:
 	cargo test --features testutils
+
+## Auto-run tests on file changes (requires cargo-watch)
+watch:
+	cargo watch -x 'test --features testutils'
 
 ## Format all Rust source files
 fmt:
