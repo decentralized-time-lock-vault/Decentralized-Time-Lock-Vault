@@ -37,9 +37,6 @@ impl TimeLockVault {
         storage::set_initialized(&env);
         storage::set_fee_recipient(&env, &fee_recipient);
 
-        if let Some(r) = fee_recipient {
-            storage::set_fee_recipient(&env, &r);
-        }
         if let Some(v) = max_deposit {
             if v <= 0 {
                 return Err(VaultError::InvalidAmount);
@@ -352,13 +349,15 @@ impl TimeLockVault {
             }
 
             storage::remove_deposit(&env, &depositor, deposit_id);
-            if storage::get_deposit_ids(&env, &depositor).len() == 0 {
+            if !storage::has_any_deposit(&env, &depositor) {
                 storage::remove_depositor(&env, &depositor);
             }
 
-        storage::remove_deposit(&env, &depositor, deposit_id);
-        if !storage::has_any_deposit(&env, &depositor) {
-            storage::remove_depositor(&env, &depositor);
+            let token_client = token::Client::new(&env, &entry.token);
+            token_client.transfer(&env.current_contract_address(), &recipient, &entry.amount);
+
+            events::withdraw_to(&env, &depositor, &recipient, &entry.token, deposit_id, entry.amount);
+            return Ok(());
         }
 
         // Try ledger-based deposit
@@ -368,8 +367,19 @@ impl TimeLockVault {
                 return Err(VaultError::FundsStillLocked);
             }
 
-        events::withdraw_to(&env, &depositor, &recipient, &entry.token, deposit_id, entry.amount);
-        Ok(())
+            storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
+            if !storage::has_any_deposit(&env, &depositor) {
+                storage::remove_depositor(&env, &depositor);
+            }
+
+            let token_client = token::Client::new(&env, &entry.token);
+            token_client.transfer(&env.current_contract_address(), &recipient, &entry.amount);
+
+            events::withdraw_to(&env, &depositor, &recipient, &entry.token, deposit_id, entry.amount);
+            return Ok(());
+        }
+
+        Err(VaultError::NoDepositFound)
     }
 
     pub fn emergency_withdraw(
@@ -389,7 +399,7 @@ impl TimeLockVault {
             }
             let token_client = token::Client::new(&env, &entry.token);
             token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
-            events::emergency_withdraw(&env, &admin, &depositor, &entry.token, entry.amount);
+            events::emergency_withdraw(&env, &admin, &depositor, &entry.token, deposit_id, entry.amount);
             return Ok(());
         }
 
@@ -400,12 +410,11 @@ impl TimeLockVault {
             }
             let token_client = token::Client::new(&env, &entry.token);
             token_client.transfer(&env.current_contract_address(), &depositor, &entry.amount);
-            events::emergency_withdraw(&env, &admin, &depositor, &entry.token, entry.amount);
+            events::emergency_withdraw(&env, &admin, &depositor, &entry.token, deposit_id, entry.amount);
             return Ok(());
         }
 
-        events::emergency_withdraw(&env, &admin, &depositor, &entry.token, deposit_id, entry.amount);
-        Ok(())
+        Err(VaultError::NoDepositFound)
     }
 
     /// Batch emergency withdrawal — processes multiple depositors in one call.
