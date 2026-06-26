@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::constants::{MAX_BATCH_SIZE, MAX_LOCK_DURATION_SECS};
+use crate::errors::VaultError;
 use crate::types::{LedgerVaultEntry, VaultEntry, VaultKey};
 
 // Number of seconds per ledger — Soroban ledgers are ~5 seconds apart.
@@ -72,26 +73,9 @@ fn remove_active_deposit_id(env: &Env, depositor: &Address, deposit_id: u32) {
 }
 
 pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
-    let active_key = VaultKey::ActiveDepositCount(depositor.clone());
-    let active: u32 = env.storage().persistent().get(&active_key).unwrap_or(0);
-    active > 0
-}
-
-/// Increment the active-deposit counter for `depositor`.
-pub fn inc_active_count(env: &Env, depositor: &Address) {
-    let key = VaultKey::ActiveDepositCount(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-    env.storage().persistent().set(&key, &(count + 1));
-    env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
-}
-
-/// Decrement the active-deposit counter for `depositor` (saturating at 0).
-pub fn dec_active_count(env: &Env, depositor: &Address) {
-    let key = VaultKey::ActiveDepositCount(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-    let new_count = count.saturating_sub(1);
-    env.storage().persistent().set(&key, &new_count);
-    env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+    let key = VaultKey::ActiveDepositIds(depositor.clone());
+    let ids: Vec<u32> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+    !ids.is_empty()
 }
 
 // ----------------------------------------------------------------
@@ -162,14 +146,6 @@ pub fn set_admin(env: &Env, admin: &Address) {
 
 pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage().persistent().get(&VaultKey::Admin)
-}
-
-pub fn require_admin(env: &Env, admin: &Address) -> Result<(), crate::errors::VaultError> {
-    let stored = get_admin(env).ok_or(crate::errors::VaultError::Unauthorized)?;
-    if *admin != stored {
-        return Err(crate::errors::VaultError::Unauthorized);
-    }
-    Ok(())
 }
 
 pub fn remove_admin(env: &Env) {
@@ -330,9 +306,10 @@ pub fn add_depositor(env: &Env, depositor: &Address) {
         .persistent()
         .extend_ttl(&member_key, BUMP_THRESHOLD, BUMP_TARGET);
 
-    let mut list = get_depositor_list(env);
-    list.push_back(depositor.clone());
-    save_depositor_list(env, &list);
+    let count = get_depositor_count_raw(env);
+    set_depositor_at(env, count, depositor);
+    set_depositor_slot(env, depositor, count);
+    set_depositor_count(env, count + 1);
 }
 
 /// O(1) swap-remove: moves the last element into the vacated slot.

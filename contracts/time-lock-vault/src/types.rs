@@ -12,7 +12,6 @@ pub enum VaultKey {
     Admin,
     PendingAdmin,
     Initialized,
-    DepositorList,
     /// Per-depositor membership flag — enables O(1) duplicate check in
     /// `add_depositor` without scanning the full `DepositorList`.
     DepositorMember(Address),
@@ -20,6 +19,9 @@ pub enum VaultKey {
     MaxDeposit,
     MaxLockSecs,
     Paused,
+    DepositorCount,
+    DepositorIndex(Address),
+    DepositorAt(u32),
 }
 
 /// Persistent record of a time-locked deposit keyed by Unix timestamp.
