@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `deposit_by_ledger(depositor, token, amount, unlock_ledger, penalty_bps)` - ledger-sequence-based deposit variant
+- `deposit_for(payer, depositor, token, amount, unlock_time, penalty_bps)` - third-party funded deposits
+- `withdraw_to(depositor, deposit_id, recipient)` - withdraw unlocked funds to an arbitrary address
+- `get_vault_by_ledger(depositor, deposit_id)` - read-only query for ledger-based entries
+- `get_vault_batch(depositors, deposit_id)` - batch query for multiple depositors
+- `get_deposit_ids(depositor)` - list all active deposit IDs per depositor
+- `ledgers_remaining(depositor, deposit_id)` - ledgers until ledger-based deposit unlocks
+- `pause(admin)` / `unpause(admin)` - admin-controlled pause/unpause of new deposits
+- `is_paused()` / `is_initialized()` - read-only query functions
+- `batch_emergency_withdraw(admin, depositors)` - batch emergency withdraw for contract migrations
+- `cancel_transfer_admin(admin)` - cancel a pending admin transfer
+- Multiple deposits per address (O(1) active deposit ID tracking via `ActiveDepositIds`)
+- Slot-based O(1) depositor index with `DepositorMember`, `DepositorCount`, `DepositorIndex`, `DepositorAt`
+- `VaultKey::DepositByLedger`, `VaultKey::Paused` storage keys
+- Events: `withdraw_to`, `dep_cancel`, `adm_xfr_cancel`, `lock_extended`, `paused`, `unpaused`
+- Error codes: `ContractPaused` (12), `FundsAlreadyUnlocked` (13), `BatchTooLarge` (14)
+
+### Changed
+- `initialize` now requires `fee_recipient: Address` as second parameter
+- `deposit` and `withdraw` now take a `deposit_id` parameter (per-depositor sequence number)
+- Storage layout uses `ActiveDepositIds` instead of per-depositor counter scan for O(1) ID queries
+- `has_any_deposit` uses `ActiveDepositIds` list check (O(1)) instead of unused counter
+- `add_depositor` uses slot-based index matching `remove_depositor`'s swap-remove pattern
+- View functions are explicitly read-only (no TTL bump, no state mutation)
+- `emergency_withdraw` correctly returns `NoDepositFound` when neither deposit type exists
+- `withdraw_to` properly handles both time-based and ledger-based deposits with token transfers
+
+### Fixed
+- `withdraw_to` function had broken control flow with duplicated/overwritten remove logic and missing token transfers
+- `emergency_withdraw` referenced out-of-scope `entry` variable in dead code path
+- `initialize` had a type-error `if let Some(r) = fee_recipient` on a non-optional `Address`
+- Duplicate `require_admin` definition in storage.rs removed
+- Duplicate function definitions for `withdraw_to`, `paused`, `unpaused` in events.rs removed
+- `add_depositor` called non-existent `get_depositor_list`/`save_depositor_list` functions
+- `has_any_deposit` used `ActiveDepositCount` key that was never written to
+- Missing `DepositorCount`, `DepositorIndex`, `DepositorAt` variants in `VaultKey` enum
+- Removed unused `DepositorList` and `ActiveDepositCount` enum variants
+- Removed dead `inc_active_count` / `dec_active_count` functions
+
 ## [0.1.0] - 2026-05-31
 
 ### Added
