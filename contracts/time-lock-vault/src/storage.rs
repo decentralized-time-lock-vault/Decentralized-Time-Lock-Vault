@@ -1,10 +1,7 @@
 use soroban_sdk::{Address, Env, Vec};
 
-use crate::{
-    constants::MAX_LOCK_DURATION_SECS,
-    errors::VaultError,
-    types::{VaultKey, VaultEntry, LedgerVaultEntry},
-};
+use crate::constants::MAX_LOCK_DURATION_SECS;
+use crate::types::{LedgerVaultEntry, VaultEntry, VaultKey};
 
 // Number of seconds per ledger — Soroban ledgers are ~5 seconds apart.
 pub const LEDGER_SECONDS: u64 = 5;
@@ -73,6 +70,18 @@ fn remove_active_deposit_id(env: &Env, depositor: &Address, deposit_id: u32) {
             .persistent()
             .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
     }
+}
+
+pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
+    let counter_key = VaultKey::DepositCounter(depositor.clone());
+    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
+    for id in 0..count {
+        let key = VaultKey::Deposit(depositor.clone(), id);
+        if env.storage().persistent().has(&key) {
+            return true;
+        }
+    }
+    false
 }
 
 // ----------------------------------------------------------------
@@ -147,6 +156,14 @@ pub fn set_admin(env: &Env, admin: &Address) {
 
 pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage().persistent().get(&VaultKey::Admin)
+}
+
+pub fn require_admin(env: &Env, admin: &Address) -> Result<(), crate::errors::VaultError> {
+    let stored = get_admin(env).ok_or(crate::errors::VaultError::Unauthorized)?;
+    if *admin != stored {
+        return Err(crate::errors::VaultError::Unauthorized);
+    }
+    Ok(())
 }
 
 pub fn remove_admin(env: &Env) {
@@ -244,28 +261,68 @@ pub fn get_fee_recipient(env: &Env) -> Option<Address> {
 }
 
 // ----------------------------------------------------------------
-//  Depositor list helpers
-//
-//  The list is the canonical ordered set of active depositors.
-//  Membership is also tracked via a per-depositor boolean key
-//  (VaultKey::DepositorMember) so add_depositor can skip the O(n)
-//  duplicate scan and operate in O(1).
+//  Depositor index helpers  (O(1) add / O(1) remove via swap-remove)
 // ----------------------------------------------------------------
 
-fn get_depositor_list(env: &Env) -> Vec<Address> {
+fn get_depositor_count_raw(env: &Env) -> u32 {
     env.storage()
         .persistent()
-        .get(&VaultKey::DepositorList)
-        .unwrap_or_else(|| Vec::new(env))
+        .get(&VaultKey::DepositorCount)
+        .unwrap_or(0)
 }
 
-fn save_depositor_list(env: &Env, list: &Vec<Address>) {
+fn set_depositor_count(env: &Env, count: u32) {
     env.storage()
         .persistent()
-        .set(&VaultKey::DepositorList, list);
+        .set(&VaultKey::DepositorCount, &count);
     env.storage()
         .persistent()
-        .extend_ttl(&VaultKey::DepositorList, BUMP_THRESHOLD, BUMP_TARGET);
+        .extend_ttl(&VaultKey::DepositorCount, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+fn get_depositor_at(env: &Env, slot: u32) -> Address {
+    env.storage()
+        .persistent()
+        .get(&VaultKey::DepositorAt(slot))
+        .unwrap()
+}
+
+fn set_depositor_at(env: &Env, slot: u32, addr: &Address) {
+    env.storage()
+        .persistent()
+        .set(&VaultKey::DepositorAt(slot), addr);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::DepositorAt(slot), BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+fn remove_depositor_at(env: &Env, slot: u32) {
+    env.storage()
+        .persistent()
+        .remove(&VaultKey::DepositorAt(slot));
+}
+
+fn get_depositor_slot(env: &Env, addr: &Address) -> Option<u32> {
+    env.storage()
+        .persistent()
+        .get(&VaultKey::DepositorIndex(addr.clone()))
+}
+
+fn set_depositor_slot(env: &Env, addr: &Address, slot: u32) {
+    env.storage()
+        .persistent()
+        .set(&VaultKey::DepositorIndex(addr.clone()), &slot);
+    env.storage().persistent().extend_ttl(
+        &VaultKey::DepositorIndex(addr.clone()),
+        BUMP_THRESHOLD,
+        BUMP_TARGET,
+    );
+}
+
+fn remove_depositor_slot(env: &Env, addr: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&VaultKey::DepositorIndex(addr.clone()));
 }
 
 pub fn add_depositor(env: &Env, depositor: &Address) {
@@ -284,25 +341,30 @@ pub fn add_depositor(env: &Env, depositor: &Address) {
     save_depositor_list(env, &list);
 }
 
+/// O(1) swap-remove: moves the last element into the vacated slot.
 pub fn remove_depositor(env: &Env, depositor: &Address) {
-    let member_key = VaultKey::DepositorMember(depositor.clone());
-    if !env.storage().persistent().has(&member_key) {
+    let count = get_depositor_count_raw(env);
+    if count == 0 {
         return;
     }
-    env.storage().persistent().remove(&member_key);
-
-    let list = get_depositor_list(env);
-    let mut new_list: Vec<Address> = Vec::new(env);
-    for addr in list.iter() {
-        if &addr != depositor {
-            new_list.push_back(addr);
-        }
+    let slot = match get_depositor_slot(env, depositor) {
+        Some(s) => s,
+        None => return,
+    };
+    let last = count - 1;
+    if slot != last {
+        // Move last element into the freed slot
+        let last_addr = get_depositor_at(env, last);
+        set_depositor_at(env, slot, &last_addr);
+        set_depositor_slot(env, &last_addr, slot);
     }
-    save_depositor_list(env, &new_list);
+    remove_depositor_at(env, last);
+    remove_depositor_slot(env, depositor);
+    set_depositor_count(env, last);
 }
 
 pub fn get_depositor_count(env: &Env) -> u32 {
-    get_depositor_list(env).len()
+    get_depositor_count_raw(env)
 }
 
 // ----------------------------------------------------------------
@@ -324,12 +386,11 @@ pub fn is_paused(env: &Env) -> bool {
 }
 
 pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
-    let list = get_depositor_list(env);
-    let len = list.len();
+    let count = get_depositor_count_raw(env);
     let mut page: Vec<Address> = Vec::new(env);
-    let end = (offset + limit).min(len);
+    let end = (offset + limit).min(count);
     for i in offset..end {
-        page.push_back(list.get(i).unwrap());
+        page.push_back(get_depositor_at(env, i));
     }
     page
 }

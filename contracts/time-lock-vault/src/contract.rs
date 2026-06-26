@@ -8,10 +8,7 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 use crate::{
     errors::VaultError,
     events, storage,
-    types::{
-        VaultEntry, LedgerVaultEntry, WithdrawResult,
-        MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_BATCH_SIZE,
-    },
+    types::{LedgerVaultEntry, VaultEntry},
 };
 
 #[contract]
@@ -40,6 +37,9 @@ impl TimeLockVault {
         storage::set_initialized(&env);
         storage::set_fee_recipient(&env, &fee_recipient);
 
+        if let Some(r) = fee_recipient {
+            storage::set_fee_recipient(&env, &r);
+        }
         if let Some(v) = max_deposit {
             if v <= 0 {
                 return Err(VaultError::InvalidAmount);
@@ -254,7 +254,7 @@ impl TimeLockVault {
         }
 
         storage::remove_deposit(&env, &depositor, deposit_id);
-        if storage::get_deposit_ids(&env, &depositor).is_empty() {
+        if !storage::has_any_deposit(&env, &depositor) {
             storage::remove_depositor(&env, &depositor);
         }
 
@@ -292,7 +292,7 @@ impl TimeLockVault {
             }
 
             storage::remove_deposit(&env, &depositor, deposit_id);
-            if storage::get_deposit_ids(&env, &depositor).is_empty() {
+            if !storage::has_any_deposit(&env, &depositor) {
                 storage::remove_depositor(&env, &depositor);
             }
 
@@ -311,7 +311,7 @@ impl TimeLockVault {
             }
 
             storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
-            if storage::get_deposit_ids(&env, &depositor).is_empty() {
+            if !storage::has_any_deposit(&env, &depositor) {
                 storage::remove_depositor(&env, &depositor);
             }
 
@@ -342,7 +342,7 @@ impl TimeLockVault {
         }
 
         storage::remove_deposit(&env, &depositor, deposit_id);
-        if storage::get_deposit_ids(&env, &depositor).is_empty() {
+        if !storage::has_any_deposit(&env, &depositor) {
             storage::remove_depositor(&env, &depositor);
         }
 
@@ -370,7 +370,7 @@ impl TimeLockVault {
             .ok_or(VaultError::NoDepositFound)?;
 
         storage::remove_deposit(&env, &depositor, deposit_id);
-        if storage::get_deposit_ids(&env, &depositor).is_empty() {
+        if !storage::has_any_deposit(&env, &depositor) {
             storage::remove_depositor(&env, &depositor);
         }
 
@@ -599,7 +599,8 @@ impl TimeLockVault {
     }
 
     pub fn get_depositors(env: Env, offset: u32, limit: u32) -> Vec<Address> {
-        storage::get_depositors_page(&env, offset, limit)
+        const MAX_PAGE_SIZE: u32 = 100;
+        storage::get_depositors_page(&env, offset, limit.min(MAX_PAGE_SIZE))
     }
 
     pub fn is_initialized(env: Env) -> bool {

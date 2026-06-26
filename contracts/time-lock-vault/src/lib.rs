@@ -10,6 +10,9 @@
 // wrapping at runtime in the deterministic Soroban WASM environment.
 #![deny(clippy::arithmetic_side_effects)]
 
+// Compile-time assertion: ensure u64 is 8 bytes (closes #82)
+const _: () = assert!(core::mem::size_of::<u64>() == 8);
+
 mod constants;
 mod contract;
 mod errors;
