@@ -9,10 +9,11 @@ use soroban_sdk::{
 };
 
 use crate::{
-    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
+    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
     contract::{TimeLockVault, TimeLockVaultClient},
     errors::VaultError,
-    types::{VaultEntry, VaultKey},
+    storage,
+    types::{LedgerVaultEntry, VaultEntry, VaultKey},
 };
 
 fn setup() -> (
@@ -1448,6 +1449,79 @@ fn test_deposit_by_ledger_transfers_tokens() {
     let unlock_ledger = env.ledger().sequence() + 1000;
     vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
     assert_eq!(token_client.balance(&alice), 9_000);
+}
+
+// ================================================================
+//  deposit_by_ledger — Pause & lock-duration validation
+// ================================================================
+
+#[test]
+fn test_deposit_by_ledger_fails_when_paused() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 1000;
+
+    vault.pause(&admin);
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::ContractPaused))
+    );
+}
+
+#[test]
+fn test_deposit_by_ledger_lock_duration_too_long_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let max_lock_ledger = env.ledger().sequence()
+        + ((MAX_LOCK_DURATION_SECS / storage::LEDGER_SECONDS) as u32)
+        + 1;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &max_lock_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooLong))
+    );
+}
+
+#[test]
+fn test_deposit_by_ledger_lock_duration_too_short_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let current = env.ledger().sequence();
+    let min_lock_ledgers = (MIN_LOCK_DURATION_SECS / storage::LEDGER_SECONDS) as u32;
+    let short_ledger = current + min_lock_ledgers - 1;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &short_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooShort))
+    );
+}
+
+#[test]
+fn test_deposit_by_ledger_at_max_duration_succeeds() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let max_lock_ledger = env.ledger().sequence()
+        + ((MAX_LOCK_DURATION_SECS / storage::LEDGER_SECONDS) as u32);
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &max_lock_ledger, &0);
+    assert_eq!(id, 0);
+}
+
+// ================================================================
+//  get_vault_by_ledger — public query
+// ================================================================
+
+#[test]
+fn test_get_vault_by_ledger_returns_entry() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+
+    let entry = vault.get_vault_by_ledger(&alice, &id).expect("entry should exist");
+    assert_eq!(entry.amount, 1_000);
+    assert_eq!(entry.unlock_ledger, unlock_ledger);
+    assert_eq!(entry.token, token);
+    assert_eq!(entry.depositor, alice);
+    assert_eq!(entry.penalty_bps, 0);
+}
+
+#[test]
+fn test_get_vault_by_ledger_missing_returns_none() {
+    let (_env, vault, _token, _admin, alice, _fee) = setup();
+    assert!(vault.get_vault_by_ledger(&alice, &0).is_none());
 }
 
 // ================================================================

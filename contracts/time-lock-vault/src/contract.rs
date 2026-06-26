@@ -196,6 +196,10 @@ impl TimeLockVault {
     ) -> Result<u32, VaultError> {
         depositor.require_auth();
 
+        if storage::is_paused(&env) {
+            return Err(VaultError::ContractPaused);
+        }
+
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -212,6 +216,16 @@ impl TimeLockVault {
         let current_ledger = env.ledger().sequence();
         if unlock_ledger <= current_ledger {
             return Err(VaultError::UnlockTimeNotInFuture);
+        }
+
+        let max_lock = storage::get_max_lock_secs(&env).unwrap_or(MAX_LOCK_DURATION_SECS);
+        let lock_ledgers = unlock_ledger.saturating_sub(current_ledger);
+        let lock_duration = (lock_ledgers as u64) * storage::LEDGER_SECONDS;
+        if lock_duration > max_lock {
+            return Err(VaultError::LockDurationTooLong);
+        }
+        if lock_duration < MIN_LOCK_DURATION_SECS {
+            return Err(VaultError::LockDurationTooShort);
         }
 
         let deposit_id = storage::next_deposit_id(&env, &depositor);
@@ -479,6 +493,15 @@ impl TimeLockVault {
     /// No auth required — this is a public read-only query (closes #81)
     pub fn get_vault(env: Env, depositor: Address, deposit_id: u32) -> Option<VaultEntry> {
         storage::get_deposit_readonly(&env, &depositor, deposit_id)
+    }
+
+    /// No auth required — this is a public read-only query for ledger-based deposits.
+    pub fn get_vault_by_ledger(
+        env: Env,
+        depositor: Address,
+        deposit_id: u32,
+    ) -> Option<LedgerVaultEntry> {
+        storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id)
     }
 
     pub fn get_vault_batch(env: Env, depositors: Vec<Address>, deposit_id: u32) -> Vec<Option<VaultEntry>> {

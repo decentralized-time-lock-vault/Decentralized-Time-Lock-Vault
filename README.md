@@ -137,9 +137,20 @@ Locks `amount` of `token` until `unlock_time` (Unix seconds).
 |---|---|---|
 | `depositor` | `Address` | Must sign |
 | `token` | `Address` | SEP-41 token contract |
-| `amount` | `i128` | `0 < amount â‰¤ 10^15` |
-| `unlock_time` | `u64` | `now < unlock_time â‰¤ now + 5 years` |
-| `penalty_bps` | `u32` | `0â€“10000` (basis points for early-exit penalty) |
+| `amount` | `i128` | `0 < amount ≤ 10^15` |
+| `unlock_time` | `u64` | `now < unlock_time ≤ now + 5 years` |
+| `penalty_bps` | `u32` | `0–10000` (basis points for early-exit penalty) |
+
+#### `deposit_by_ledger(depositor, token, amount, unlock_ledger, penalty_bps)`
+Locks `amount` of `token` until `unlock_ledger` (ledger sequence number). Ledgers close approximately every 5 seconds.
+
+| Param | Type | Constraint |
+|---|---|---|
+| `depositor` | `Address` | Must sign |
+| `token` | `Address` | SEP-41 token contract |
+| `amount` | `i128` | `0 < amount ≤ 10^15` |
+| `unlock_ledger` | `u32` | `current_ledger < unlock_ledger ≤ current_ledger + 5 years` |
+| `penalty_bps` | `u32` | `0–10000` (basis points for early-exit penalty) |
 
 #### `cancel_deposit(depositor)`
 Cancels an active deposit before the unlock time. The penalty (`penalty_bps` set at deposit time) is sent to the `fee_recipient`; the remainder is returned to the depositor. Fails with `FundsStillLocked` if the vault is already past its unlock time (use `withdraw` instead).
@@ -189,10 +200,13 @@ Permanently removes admin privileges. After this call, `emergency_withdraw` and 
 
 ### 📖 Read-only Queries
 
-#### `get_vault(depositor, deposit_id) â†’ Option<VaultEntry>`
+#### `get_vault(depositor, deposit_id) → Option<VaultEntry>`
 Returns the current vault entry. Does **not** bump storage TTL (no extra fees).
 
-#### `time_remaining(depositor, deposit_id) â†’ u64`
+#### `get_vault_by_ledger(depositor, deposit_id) → Option<LedgerVaultEntry>`
+Returns the current ledger-based vault entry. Does **not** bump storage TTL (no extra fees).
+
+#### `time_remaining(depositor, deposit_id) → u64`
 Returns seconds until unlock. Returns `0` if unlocked or no deposit exists. Does **not** bump TTL.
 
 #### `get_time() â†’ u64`
