@@ -1586,6 +1586,60 @@ fn test_withdraw_to_removes_depositor() {
 }
 
 // ================================================================
+//  withdraw_to — ledger deposit support (Issue #343)
+// ================================================================
+
+#[test]
+fn test_withdraw_to_ledger_deposit_success() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let recipient: Address = Address::generate(&env);
+    let token_client = TokenClient::new(&env, &token);
+
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+
+    env.ledger().set(LedgerInfo {
+        timestamp: env.ledger().timestamp(),
+        protocol_version: env.ledger().protocol_version(),
+        sequence_number: env.ledger().sequence() + 1000,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16,
+        min_persistent_entry_ttl: 4096,
+        max_entry_ttl: 33_000_000,
+    });
+
+    vault.withdraw_to(&alice, &id, &recipient);
+
+    assert!(vault.get_vault_by_ledger(&alice, &id).is_none());
+    assert_eq!(token_client.balance(&recipient), 1_000);
+}
+
+#[test]
+fn test_withdraw_to_ledger_deposit_before_unlock_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let recipient: Address = Address::generate(&env);
+
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+
+    assert_eq!(
+        vault.try_withdraw_to(&alice, &id, &recipient),
+        Err(Ok(VaultError::FundsStillLocked))
+    );
+}
+
+#[test]
+fn test_withdraw_to_ledger_deposit_no_deposit_fails() {
+    let (env, vault, _token, _admin, alice, _fee) = setup();
+    let recipient: Address = Address::generate(&env);
+    assert_eq!(
+        vault.try_withdraw_to(&alice, &0, &recipient),
+        Err(Ok(VaultError::NoDepositFound))
+    );
+}
+
+// ================================================================
 //  get_vault_batch — Issue #343
 // ================================================================
 

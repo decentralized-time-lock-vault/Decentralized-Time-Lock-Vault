@@ -343,15 +343,35 @@ impl TimeLockVault {
     ) -> Result<(), VaultError> {
         depositor.require_auth();
 
-        let entry = storage::get_deposit_readonly(&env, &depositor, deposit_id)
+        let entry = storage::get_deposit_readonly(&env, &depositor, deposit_id);
+
+        if let Some(entry) = entry {
+            let now = env.ledger().timestamp();
+            if now < entry.unlock_time {
+                return Err(VaultError::FundsStillLocked);
+            }
+
+            storage::remove_deposit(&env, &depositor, deposit_id);
+            if !storage::has_any_deposit(&env, &depositor) {
+                storage::remove_depositor(&env, &depositor);
+            }
+
+            let token_client = token::Client::new(&env, &entry.token);
+            token_client.transfer(&env.current_contract_address(), &recipient, &entry.amount);
+
+            events::withdraw_to(&env, &depositor, &recipient, &entry.token, deposit_id, entry.amount);
+            return Ok(());
+        }
+
+        let entry = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id)
             .ok_or(VaultError::NoDepositFound)?;
 
-        let now = env.ledger().timestamp();
-        if now < entry.unlock_time {
+        let current_ledger = env.ledger().sequence();
+        if current_ledger < entry.unlock_ledger {
             return Err(VaultError::FundsStillLocked);
         }
 
-        storage::remove_deposit(&env, &depositor, deposit_id);
+        storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
         if !storage::has_any_deposit(&env, &depositor) {
             storage::remove_depositor(&env, &depositor);
         }
