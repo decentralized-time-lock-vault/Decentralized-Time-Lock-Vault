@@ -532,7 +532,7 @@ make test
 
 > Tests run natively (no `--target` flag) so that `soroban-sdk`'s `testutils` feature works. Never run `cargo test --target wasm32-unknown-unknown`.
 
-### 🔍 Full CI check (fmt + lint + test + audit + deny)
+### 🔍 Full CI check (fmt + lint + test + build + audit + deny)
 
 ```bash
 make check
