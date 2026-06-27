@@ -37,7 +37,7 @@ A production-ready Soroban smart contract on the Stellar blockchain that locks X
 The deposit and withdrawal lifecycle:
 
 1. **Deposit** — A user calls `deposit(token, amount, unlock_time)` → tokens transfer from their wallet into the contract
-2. **Storage** — The contract stores a `VaultEntry` in **Persistent Storage** keyed by the depositor's address
+2. **Storage** — The contract stores a `VaultEntry` in **Persistent Storage** keyed by the depositor's address and deposit id
 3. **Verification** — When the user calls `withdraw()`, the contract checks `env.ledger().timestamp() >= unlock_time`
 4. **Unlock** — If the time has passed, tokens are returned. Otherwise the call fails with `FundsStillLocked`
 5. **Admin Recovery** — An admin can perform emergency withdrawals (funds always return to the depositor, never to the admin)
@@ -72,19 +72,32 @@ Depositor
 
 ```
 Persistent Storage
-â”œâ”€â”€ VaultKey::Admin                    â†’ Address
-â”‚       (set once on initialize; removed on renounce_admin)
-â”‚
-â”œâ”€â”€ VaultKey::PendingAdmin             â†’ Address
-â”‚       (set by transfer_admin; cleared by accept_admin / cancel_transfer_admin)
-â”‚
-â””â”€â”€ VaultKey::Deposit(depositor: Address) â†’ VaultEntry
-        â”œâ”€â”€ token:       Address   (SEP-41 token contract)
-        â”œâ”€â”€ amount:      i128      (locked units)
-        â”œâ”€â”€ unlock_time: u64       (Unix seconds)
-        â””â”€â”€ depositor:   Address   (owner; stored for event emission)
+├── VaultKey::Admin                    → Address
+│       (set once on initialize; removed on renounce_admin)
+│
+├── VaultKey::PendingAdmin             → Address
+│       (set by transfer_admin; cleared by accept_admin / cancel_transfer_admin)
+│
+├── VaultKey::Deposit(depositor: Address, deposit_id: u32) → VaultEntry
+│       token:       Address   (SEP-41 token contract)
+│       amount:      i128      (locked units)
+│       unlock_time: u64       (Unix seconds)
+│       depositor:   Address   (owner; stored for event emission)
+│       penalty_bps: u32       (early-exit penalty basis points)
+│
+├── VaultKey::DepositByLedger(depositor: Address, deposit_id: u32) → LedgerVaultEntry
+│       token:         Address
+│       amount:        i128
+│       unlock_ledger: u32
+│       depositor:     Address
+│       penalty_bps:   u32
+│
+├── VaultKey::ActiveDepositIds(depositor: Address) → Vec<u32>
+│       (active deposit ids for a depositor)
+│
+├── VaultKey::ActiveDepositCount(depositor: Address) → u32
+│       (active deposit count for a depositor)
 ```
-
 All entries use TTL bump threshold â‰ˆ 30 days and target â‰ˆ 5.2 years so a max-duration deposit cannot expire before its unlock time.
 
 ---
@@ -131,7 +144,7 @@ Sets the admin address. Optionally overrides the compile-time limits for this de
 ### 💰 Core Functions
 
 #### `deposit(depositor, token, amount, unlock_time, penalty_bps)`
-Locks `amount` of `token` until `unlock_time` (Unix seconds).
+Locks `amount` of `token` until `unlock_time` (Unix seconds) and returns a unique `deposit_id` for the depositor.
 
 | Param | Type | Constraint |
 |---|---|---|
@@ -140,6 +153,8 @@ Locks `amount` of `token` until `unlock_time` (Unix seconds).
 | `amount` | `i128` | `0 < amount â‰¤ 10^15` |
 | `unlock_time` | `u64` | `now < unlock_time â‰¤ now + 5 years` |
 | `penalty_bps` | `u32` | `0â€“10000` (basis points for early-exit penalty) |
+
+Each depositor can create multiple active deposits. The returned `deposit_id` must be used for later `withdraw`, `cancel_deposit`, or `get_vault` calls.
 
 #### `cancel_deposit(depositor)`
 Cancels an active deposit before the unlock time. The penalty (`penalty_bps` set at deposit time) is sent to the `fee_recipient`; the remainder is returned to the depositor. Fails with `FundsStillLocked` if the vault is already past its unlock time (use `withdraw` instead).
@@ -190,7 +205,7 @@ Permanently removes admin privileges. After this call, `emergency_withdraw` and 
 ### 📖 Read-only Queries
 
 #### `get_vault(depositor, deposit_id) â†’ Option<VaultEntry>`
-Returns the current vault entry. Does **not** bump storage TTL (no extra fees).
+Returns the current vault entry for the given `deposit_id`. Does **not** bump storage TTL (no extra fees).
 
 #### `time_remaining(depositor, deposit_id) â†’ u64`
 Returns seconds until unlock. Returns `0` if unlocked or no deposit exists. Does **not** bump TTL.
@@ -260,7 +275,10 @@ All entries use **Persistent Storage** with TTL bump threshold â‰ˆ 30 days (
 | `VaultKey::MaxLockSecs` | `u64` | Set on `initialize` if overridden; absent means use compile-time default |
 | `VaultKey::DepositCounter(depositor)` | `u32` | Incremented on each `deposit`; never decremented |
 | `VaultKey::Deposit(depositor, id)` | `VaultEntry` | Created on `deposit`; removed on `withdraw` / `emergency_withdraw` / `cancel_deposit` |
-| `VaultKey::DepositorList` | `Vec<Address>` | Updated on `deposit` and `withdraw` |
+| `VaultKey::ActiveDepositIds(depositor)` | `Vec<u32>` | Active deposit IDs for a depositor |
+| `VaultKey::ActiveDepositCount(depositor)` | `u32` | Active deposit count for a depositor |
+| `VaultKey::DepositorAt(slot)` | `Address` | Depositor index used for pagination |
+| `VaultKey::DepositorIndex(depositor)` | `u32` | Slot index for an active depositor |
 
 `VaultEntry` fields: `token: Address`, `amount: i128`, `unlock_time: u64`, `depositor: Address`, `penalty_bps: u32`.
 
