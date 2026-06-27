@@ -1,13 +1,30 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-pub fn deposit(env: &Env, depositor: &Address, token: &Address, amount: i128, unlock_time: u64) {
+pub fn deposit(env: &Env, depositor: &Address, token: &Address, deposit_id: u32, amount: i128, unlock_time: u64) {
     let topics = (symbol_short!("deposit"), depositor.clone(), token.clone());
-    env.events().publish(topics, (amount, unlock_time));
+    env.events().publish(topics, (deposit_id, amount, unlock_time));
 }
 
-pub fn withdraw(env: &Env, depositor: &Address, token: &Address, amount: i128) {
+pub fn withdraw(env: &Env, depositor: &Address, token: &Address, deposit_id: u32, amount: i128) {
     let topics = (symbol_short!("withdraw"), depositor.clone(), token.clone());
-    env.events().publish(topics, amount);
+    env.events().publish(topics, (deposit_id, amount));
+}
+
+pub fn withdraw_to(
+    env: &Env,
+    depositor: &Address,
+    recipient: &Address,
+    token: &Address,
+    deposit_id: u32,
+    amount: i128,
+) {
+    let topics = (
+        Symbol::new(env, "withdraw_to"),
+        depositor.clone(),
+        recipient.clone(),
+        token.clone(),
+    );
+    env.events().publish(topics, (deposit_id, amount));
 }
 
 pub fn emergency_withdraw(
@@ -15,13 +32,27 @@ pub fn emergency_withdraw(
     admin: &Address,
     depositor: &Address,
     token: &Address,
+    deposit_id: u32,
     amount: i128,
 ) {
-    // admin is placed in the data payload rather than topics to avoid
-    // leaking the admin address in the publicly-indexed event topic stream.
     let topics = (Symbol::new(env, "emrg_wdraw"), depositor.clone());
     env.events()
-        .publish(topics, (admin.clone(), token.clone(), amount));
+        .publish(topics, (deposit_id, admin.clone(), token.clone(), amount));
+}
+
+pub fn deposit_cancelled(
+    env: &Env,
+    depositor: &Address,
+    token: &Address,
+    amount: i128,
+    penalty: i128,
+) {
+    let topics = (
+        Symbol::new(env, "dep_cancel"),
+        depositor.clone(),
+        token.clone(),
+    );
+    env.events().publish(topics, (amount, penalty));
 }
 
 pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admin: &Address) {
@@ -52,6 +83,33 @@ pub fn lock_extended(
 ) {
     let topics = (Symbol::new(env, "lock_extended"), depositor.clone());
     env.events().publish(topics, (old_unlock_time, new_unlock_time));
+}
+
+pub fn paused(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("paused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn unpaused(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("unpaused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn withdraw_to(
+    env: &Env,
+    depositor: &Address,
+    recipient: &Address,
+    token: &Address,
+    deposit_id: u32,
+    amount: i128,
+) {
+    let topics = (
+        Symbol::new(env, "withdraw_to"),
+        depositor.clone(),
+        recipient.clone(),
+        token.clone(),
+    );
+    env.events().publish(topics, (deposit_id, amount));
 }
 
 pub fn deposit_cancelled(
