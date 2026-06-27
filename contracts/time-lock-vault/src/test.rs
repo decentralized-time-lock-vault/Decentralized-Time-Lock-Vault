@@ -1697,6 +1697,8 @@ fn test_has_any_deposit_with_multiple_deposits_one_remaining() {
 /// Pause check: deposit_by_ledger must fail when contract is paused.
 #[test]
 fn test_deposit_by_ledger_fails_when_paused() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    vault.pause(&admin);
     let unlock_ledger = env.ledger().sequence() + 1000;
     assert_eq!(
         vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
