@@ -393,6 +393,7 @@ All events are emitted via `env.events().publish(topics, data)`.
 | Event | Topics | Data |
 |---|---|---|
 | `deposit` | `("deposit", depositor, token)` | `(deposit_id, amount, unlock_time)` |
+| `top_up` | `("top_up", depositor, token)` | `(deposit_id, added, new_total)` |
 | `withdraw` | `("withdraw", depositor, token)` | `(deposit_id, amount)` |
 | `withdraw_to` | `("withdraw_to", depositor, recipient, token)` | `(deposit_id, amount)` |
 | `emrg_wdraw` | `("emrg_wdraw", depositor)` | `(deposit_id, admin, token, amount)` |
