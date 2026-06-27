@@ -99,9 +99,6 @@ impl TimeLockVault {
             return Err(VaultError::LockDurationTooLong);
         }
 
-        // --- Duplicate deposit guard (single read, no TTL bump) ---
-        if storage::get_deposit_readonly(&env, &depositor).is_some() {
-            return Err(VaultError::DepositAlreadyExists);
         if lock_duration < MIN_LOCK_DURATION_SECS {
             return Err(VaultError::LockDurationTooShort);
         }
@@ -265,6 +262,10 @@ impl TimeLockVault {
 
     pub fn cancel_deposit(env: Env, depositor: Address, deposit_id: u32) -> Result<(), VaultError> {
         depositor.require_auth();
+
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
 
         // Try timestamp-based deposit first
         if let Some(entry) = storage::get_deposit(&env, &depositor, deposit_id) {
@@ -448,9 +449,6 @@ impl TimeLockVault {
             return Ok(());
         }
 
-        // --- Load deposit (no TTL bump — entry is about to be removed) ---
-        let entry = storage::get_deposit_readonly(&env, &depositor)
-            .ok_or(VaultError::NoDepositFound)?;
         if let Some(entry) = storage::get_deposit_by_ledger_readonly(&env, &depositor, deposit_id) {
             storage::remove_deposit_by_ledger(&env, &depositor, deposit_id);
             if !storage::has_any_deposit(&env, &depositor) {

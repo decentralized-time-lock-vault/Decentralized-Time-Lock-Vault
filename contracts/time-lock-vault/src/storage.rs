@@ -107,11 +107,6 @@ pub fn set_deposit(env: &Env, depositor: &Address, deposit_id: u32, entry: &Vaul
     inc_active_count(env, depositor);
 }
 
-/// Retrieve the vault entry for `depositor` — does NOT bump TTL.
-/// Use this for all reads (writes/mutations as well as view functions)
-/// since mutations that follow will either remove the entry or replace it.
-pub fn get_deposit_readonly(env: &Env, depositor: &Address) -> Option<VaultEntry> {
-    let key = VaultKey::Deposit(depositor.clone());
 pub fn get_deposit(env: &Env, depositor: &Address, deposit_id: u32) -> Option<VaultEntry> {
     let key = VaultKey::Deposit(depositor.clone(), deposit_id);
     let entry: Option<VaultEntry> = env.storage().persistent().get(&key);

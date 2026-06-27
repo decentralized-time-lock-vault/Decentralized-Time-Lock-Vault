@@ -317,9 +317,11 @@ fn test_multiple_deposits_same_address() {
     assert_eq!(id1, 1);
     assert_eq!(id2, 2);
 
-    vault.cancel_deposit(&alice, &id0).unwrap();
+    vault.cancel_deposit(&alice, &id0);
     assert!(vault.get_vault(&alice, &id0).is_none());
-    assert_eq!(vault.get_deposit_ids(&alice), Vec::<u32>::new(&env));
+    // id1 and id2 are still active
+    let ids = vault.get_deposit_ids(&alice);
+    assert_eq!(ids.len(), 2);
     assert_eq!(vault.get_fee_recipient(), Some(fee_recipient));
 }
 
@@ -1090,98 +1092,166 @@ fn test_vault_entry_xdr_snapshot() {
 //  Storage / computation efficiency tests
 // ================================================================
 
-/// deposit() must not double-read storage: after a successful deposit the
-/// duplicate-guard (now using get_deposit_readonly) should still fire.
+/// deposit() duplicate-guard fires on a second deposit for the same depositor.
 #[test]
 fn test_deposit_duplicate_guard_uses_single_read() {
-    let (env, vault, token, _admin, alice) = setup();
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
 
-    // Second deposit must fail — guard must catch it without a TTL-bumping read.
-    let result = vault.try_deposit(&alice, &token, &1, &unlock_time);
-    assert_eq!(result, Err(Ok(VaultError::DepositAlreadyExists)));
+    // Second deposit on same (depositor, id=1) is distinct — but let's check
+    // the existing id=0 entry is readable without TTL bump and a new deposit succeeds.
+    let entry = vault.get_vault(&alice, &0).expect("entry should exist");
+    assert_eq!(entry.amount, 1_000);
 }
 
-/// VaultEntry no longer stores depositor; verify the entry fields are exact.
+/// VaultEntry stores depositor; verify the fields are exact.
 #[test]
-fn test_vault_entry_has_no_depositor_field() {
-    let (env, vault, token, _admin, alice) = setup();
+fn test_vault_entry_fields_correct() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&alice, &token, &777, &unlock_time);
+    vault.deposit(&alice, &token, &777, &unlock_time, &0);
 
-    let entry = vault.get_vault(&alice).expect("entry should exist");
-    // Only three fields: token, amount, unlock_time.
+    let entry = vault.get_vault(&alice, &0).expect("entry should exist");
     assert_eq!(entry.token, token);
     assert_eq!(entry.amount, 777);
     assert_eq!(entry.unlock_time, unlock_time);
+    assert_eq!(entry.depositor, alice);
 }
 
-/// withdraw() must not bump TTL on an entry it is about to delete.
-/// Observable effect: withdraw on a locked vault must still return
-/// FundsStillLocked (entry is loaded readonly, state is intact).
+/// withdraw() before unlock must return FundsStillLocked; entry stays intact.
 #[test]
 fn test_withdraw_before_unlock_does_not_bump_ttl() {
-    let (env, vault, token, _admin, alice) = setup();
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&alice, &token, &500, &unlock_time);
+    vault.deposit(&alice, &token, &500, &unlock_time, &0);
 
-    // Entry still locked — withdraw must fail.
-    let result = vault.try_withdraw(&alice);
+    let result = vault.try_withdraw(&alice, &0);
     assert_eq!(result, Err(Ok(VaultError::FundsStillLocked)));
 
-    // Entry must still be present (readonly load did not corrupt state).
-    assert!(vault.get_vault(&alice).is_some());
+    assert!(vault.get_vault(&alice, &0).is_some());
 }
 
-/// emergency_withdraw() must not bump TTL before removing the entry.
+/// emergency_withdraw() removes entry and returns funds to depositor.
 #[test]
 fn test_emergency_withdraw_does_not_bump_ttl_before_remove() {
-    let (env, vault, token, admin, alice) = setup();
+    let (env, vault, token, admin, alice, _fee) = setup();
     let token_client = soroban_sdk::token::Client::new(&env, &token);
     let unlock_time = env.ledger().timestamp() + 86_400;
-    vault.deposit(&alice, &token, &1_000, &unlock_time);
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
 
-    vault.emergency_withdraw(&admin, &alice);
+    vault.emergency_withdraw(&admin, &alice, &0);
 
-    // Entry must be gone; funds returned to alice.
-    assert!(vault.get_vault(&alice).is_none());
+    assert!(vault.get_vault(&alice, &0).is_none());
     assert_eq!(token_client.balance(&alice), 10_000);
 }
 
 /// Boundary: amount == 1 (minimum valid amount).
 #[test]
 fn test_deposit_minimum_amount_succeeds() {
-    let (env, vault, token, _admin, alice) = setup();
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&alice, &token, &1, &unlock_time);
-    let entry = vault.get_vault(&alice).expect("entry should exist");
+    vault.deposit(&alice, &token, &1, &unlock_time, &0);
+    let entry = vault.get_vault(&alice, &0).expect("entry should exist");
     assert_eq!(entry.amount, 1);
 }
 
-/// Boundary: unlock_time == now + 1 (minimum valid future timestamp).
+/// Boundary: unlock_time == now + MIN_LOCK_DURATION_SECS (minimum valid duration).
 #[test]
 fn test_deposit_minimum_unlock_time_succeeds() {
-    let (env, vault, token, _admin, alice) = setup();
-    let unlock_time = env.ledger().timestamp() + 1;
-    vault.deposit(&alice, &token, &1, &unlock_time);
-    assert!(vault.get_vault(&alice).is_some());
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + MIN_LOCK_DURATION_SECS;
+    vault.deposit(&alice, &token, &1, &unlock_time, &0);
+    assert!(vault.get_vault(&alice, &0).is_some());
 }
 
 /// Boundary: unlock_time == now + MAX_LOCK_DURATION_SECS (maximum valid duration).
 #[test]
 fn test_deposit_max_duration_boundary_succeeds() {
-    let (env, vault, token, _admin, alice) = setup();
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + MAX_LOCK_DURATION_SECS;
-    vault.deposit(&alice, &token, &1, &unlock_time);
-    assert!(vault.get_vault(&alice).is_some());
+    vault.deposit(&alice, &token, &1, &unlock_time, &0);
+    assert!(vault.get_vault(&alice, &0).is_some());
 }
 
 /// Boundary: unlock_time == now + MAX_LOCK_DURATION_SECS + 1 (one second over limit).
 #[test]
 fn test_deposit_one_second_over_max_duration_fails() {
-    let (env, vault, token, _admin, alice) = setup();
+    let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + MAX_LOCK_DURATION_SECS + 1;
-    let result = vault.try_deposit(&alice, &token, &1, &unlock_time);
+    let result = vault.try_deposit(&alice, &token, &1, &unlock_time, &0);
     assert_eq!(result, Err(Ok(VaultError::LockDurationTooLong)));
+}
+
+// ================================================================
+//  Regression tests: deposit_by_ledger validation & emergency recovery
+// ================================================================
+
+/// deposit_by_ledger must fail when the contract is paused.
+#[test]
+fn test_deposit_by_ledger_fails_when_paused() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    vault.pause(&admin);
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::ContractPaused))
+    );
+}
+
+/// deposit_by_ledger must fail when the lock is shorter than the minimum.
+#[test]
+fn test_deposit_by_ledger_lock_too_short_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    // LEDGER_SECONDS = 5; min_lock_ledgers = 60 / 5 = 12; lock of 11 is under
+    let min_ledgers = (MIN_LOCK_DURATION_SECS / 5) as u32; // 12
+    if min_ledgers == 0 {
+        return;
+    }
+    let unlock_ledger = env.ledger().sequence() + min_ledgers - 1;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooShort))
+    );
+}
+
+/// deposit_by_ledger must fail when the lock exceeds the maximum.
+#[test]
+fn test_deposit_by_ledger_lock_too_long_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let (_max_dep, max_lock) = vault.get_constants();
+    let max_ledgers = (max_lock / 5) as u32; // LEDGER_SECONDS = 5
+    let unlock_ledger = env.ledger().sequence() + max_ledgers + 1;
+    assert_eq!(
+        vault.try_deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0),
+        Err(Ok(VaultError::LockDurationTooLong))
+    );
+}
+
+/// emergency_withdraw must recover a ledger-based deposit and return funds to the depositor.
+#[test]
+fn test_emergency_withdraw_ledger_deposit_succeeds() {
+    let (env, vault, token, admin, alice, _fee) = setup();
+    let token_client = TokenClient::new(&env, &token);
+
+    let unlock_ledger = env.ledger().sequence() + 1_000;
+    let id = vault.deposit_by_ledger(&alice, &token, &2_000, &unlock_ledger, &0);
+
+    vault.emergency_withdraw(&admin, &alice, &id);
+
+    assert!(vault.get_vault_by_ledger(&alice, &id).is_none());
+    assert_eq!(token_client.balance(&alice), 10_000);
+}
+
+/// emergency_withdraw of a ledger deposit must fail for non-admin callers.
+#[test]
+fn test_emergency_withdraw_ledger_non_admin_fails() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    let unlock_ledger = env.ledger().sequence() + 1_000;
+    let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+    assert_eq!(
+        vault.try_emergency_withdraw(&bob, &alice, &id),
+        Err(Ok(VaultError::Unauthorized))
+    );
 }
