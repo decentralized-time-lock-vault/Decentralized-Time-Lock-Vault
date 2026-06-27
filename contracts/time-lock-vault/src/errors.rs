@@ -28,4 +28,7 @@ pub enum VaultError {
     /// Returned by `batch_emergency_withdraw` when `depositors.len()` exceeds
     /// `MAX_BATCH_SIZE`.
     BatchTooLarge = 14,
+    DepositorFrozen = 15,
+    MigrationNotAllowed = 16,
+    TokenFrozen = 17,
 }
