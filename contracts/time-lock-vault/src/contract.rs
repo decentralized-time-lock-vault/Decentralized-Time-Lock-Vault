@@ -262,6 +262,10 @@ impl TimeLockVault {
     pub fn cancel_deposit(env: Env, depositor: Address, deposit_id: u32) -> Result<(), VaultError> {
         depositor.require_auth();
 
+        if storage::is_frozen(&env, &depositor) {
+            return Err(VaultError::DepositorFrozen);
+        }
+
         // Try timestamp-based deposit first
         if let Some(entry) = storage::get_deposit(&env, &depositor, deposit_id) {
             let now = env.ledger().timestamp();
