@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Documentation clarified current contract behavior for timestamp-based vs ledger-based deposits, pause semantics, and admin recovery.
+
 ## [0.1.0] - 2026-05-31
 
 ### Added
@@ -114,7 +117,7 @@ contract.deposit_for(&payer, &depositor, &token, &amount, &(now + one_hour), &0_
 #### Storage
 
 - All entries use Persistent Storage with TTL bump threshold ~30 days (`518_400` ledgers) and target ~5.2 years (`33_000_000` ledgers)
-- Storage keys: `Admin`, `PendingAdmin`, `Initialized`, `FeeRecipient`, `MaxDeposit`, `MaxLockSecs`, `DepositCounter(depositor)`, `Deposit(depositor, id)`, `DepositorList`
+- Storage keys: `Admin`, `PendingAdmin`, `Initialized`, `FeeRecipient`, `MaxDeposit`, `MaxLockSecs`, `DepositCounter(depositor)`, `Deposit(depositor, id)`, `ActiveDepositIds(depositor)`, `ActiveDepositCount(depositor)`, `DepositorAt(slot)`, `DepositorIndex(depositor)`
 
 #### Infrastructure
 
