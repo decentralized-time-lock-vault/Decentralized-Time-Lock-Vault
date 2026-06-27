@@ -3,15 +3,14 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Events, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env,
+    Address, Env, IntoVal, Symbol,
 };
 
 use crate::{
     constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
     contract::{TimeLockVault, TimeLockVaultClient},
-    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS},
     errors::VaultError,
     types::VaultEntry,
 };
@@ -21,7 +20,6 @@ use crate::{
 // ================================================================
 
 /// Returns (env, vault_client, token_address, admin, alice, fee_recipient).
-fn setup() -> (Env, TimeLockVaultClient<'static>, Address, Address, Address, Address) {
 fn setup() -> (
     Env,
     TimeLockVaultClient<'static>,
@@ -44,7 +42,6 @@ fn setup() -> (
 
     StellarAssetClient::new(&env, &token_address).mint(&alice, &10_000);
 
-    vault.initialize(&admin, &fee_recipient);
     vault.initialize(&admin, &fee_recipient, &None, &None);
 
     (env, vault, token_address, admin, alice, fee_recipient)
@@ -552,19 +549,6 @@ fn test_emergency_withdraw_no_deposit_fails() {
 //  Emergency Withdrawal — ledger-based deposits (issue #281)
 // ================================================================
 
-fn advance_ledger(env: &Env, ledgers: u32) {
-    env.ledger().set(LedgerInfo {
-        timestamp: env.ledger().timestamp(),
-        protocol_version: env.ledger().protocol_version(),
-        sequence_number: env.ledger().sequence() + ledgers,
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 16,
-        min_persistent_entry_ttl: 4096,
-        max_entry_ttl: 33_000_000,
-    });
-}
-
 #[test]
 fn test_emergency_withdraw_ledger_deposit_before_unlock_succeeds() {
     let (env, vault, token, admin, alice, _fee) = setup();
@@ -604,15 +588,20 @@ fn test_emergency_withdraw_ledger_deposit_emits_event() {
     vault.emergency_withdraw(&admin, &alice, &0);
 
     let events = env.events().all();
-    let last = events.last().unwrap();
-    assert_eq!(
-        last,
-        (
-            vault.address.clone(),
-            (Symbol::new(&env, "emrg_wdraw"), alice.clone()).into_val(&env),
-            (0_u32, admin.clone(), token.clone(), 2_000_i128).into_val(&env),
-        )
-    );
+    let last = events.last().unwrap().clone();
+    let (contract_id, topics, data) = last;
+    assert_eq!(contract_id, vault.address);
+
+    let topic_0: Symbol = topics.get(0).unwrap().into_val(&env);
+    let topic_1: Address = topics.get(1).unwrap().into_val(&env);
+    assert_eq!(topic_0, Symbol::new(&env, "emrg_wdraw"));
+    assert_eq!(topic_1, alice);
+
+    let data_tuple: (u32, Address, Address, i128) = data.into_val(&env);
+    assert_eq!(data_tuple.0, 0_u32);
+    assert_eq!(data_tuple.1, admin);
+    assert_eq!(data_tuple.2, token);
+    assert_eq!(data_tuple.3, 2_000_i128);
 }
 
 #[test]
@@ -711,6 +700,7 @@ fn test_get_depositors_pagination() {
     let carol: Address = Address::generate(&env);
     StellarAssetClient::new(&env, &token).mint(&alice, &5_000);
     StellarAssetClient::new(&env, &token).mint(&bob, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&carol, &5_000);
 
     let t1 = env.ledger().timestamp() + 3600;
     let t2 = env.ledger().timestamp() + 7200;
@@ -742,10 +732,7 @@ fn test_pause_by_admin_succeeds() {
 #[test]
 fn test_pause_by_non_admin_fails() {
     let (env, vault, _token, _admin, alice, _fee) = setup();
-    assert_eq!(
-        vault.try_pause(&alice),
-        Err(Ok(VaultError::Unauthorized))
-    );
+    assert_eq!(vault.try_pause(&alice), Err(Ok(VaultError::Unauthorized)));
 }
 
 #[test]
@@ -753,7 +740,13 @@ fn test_deposit_fails_when_paused() {
     let (env, vault, token, admin, alice, _fee) = setup();
     vault.pause(&admin);
     assert_eq!(
-        vault.try_deposit(&alice, &token, &1_000, &(env.ledger().timestamp() + 3600), &0),
+        vault.try_deposit(
+            &alice,
+            &token,
+            &1_000,
+            &(env.ledger().timestamp() + 3600),
+            &0
+        ),
         Err(Ok(VaultError::ContractPaused))
     );
 }
@@ -830,7 +823,9 @@ fn test_get_vault_by_ledger_returns_entry() {
     let (env, vault, token, _admin, alice, _fee) = setup();
     let unlock_ledger = env.ledger().sequence() + 1_000;
     let id = vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
-    let entry = vault.get_vault_by_ledger(&alice, &id).expect("entry must exist");
+    let entry = vault
+        .get_vault_by_ledger(&alice, &id)
+        .expect("entry must exist");
     assert_eq!(entry.amount, 1_000);
     assert_eq!(entry.unlock_ledger, unlock_ledger);
     assert_eq!(entry.depositor, alice);
@@ -967,7 +962,13 @@ fn test_deposit_fails_when_frozen() {
     let (env, vault, token, admin, alice, _fee) = setup();
     vault.freeze_depositor(&admin, &alice);
     assert_eq!(
-        vault.try_deposit(&alice, &token, &1_000, &(env.ledger().timestamp() + 3600), &0),
+        vault.try_deposit(
+            &alice,
+            &token,
+            &1_000,
+            &(env.ledger().timestamp() + 3600),
+            &0
+        ),
         Err(Ok(VaultError::DepositorFrozen))
     );
 }
@@ -977,7 +978,13 @@ fn test_deposit_by_ledger_fails_when_frozen() {
     let (env, vault, token, admin, alice, _fee) = setup();
     vault.freeze_depositor(&admin, &alice);
     assert_eq!(
-        vault.try_deposit_by_ledger(&alice, &token, &1_000, &(env.ledger().sequence() + 1000), &0),
+        vault.try_deposit_by_ledger(
+            &alice,
+            &token,
+            &1_000,
+            &(env.ledger().sequence() + 1000),
+            &0
+        ),
         Err(Ok(VaultError::DepositorFrozen))
     );
 }
@@ -1041,12 +1048,24 @@ fn test_unfreeze_restores_deposit_capability() {
     let (env, vault, token, admin, alice, _fee) = setup();
     vault.freeze_depositor(&admin, &alice);
     assert_eq!(
-        vault.try_deposit(&alice, &token, &1_000, &(env.ledger().timestamp() + 3600), &0),
+        vault.try_deposit(
+            &alice,
+            &token,
+            &1_000,
+            &(env.ledger().timestamp() + 3600),
+            &0
+        ),
         Err(Ok(VaultError::DepositorFrozen))
     );
 
     vault.unfreeze_depositor(&admin, &alice);
-    vault.deposit(&alice, &token, &1_000, &(env.ledger().timestamp() + 3600), &0);
+    vault.deposit(
+        &alice,
+        &token,
+        &1_000,
+        &(env.ledger().timestamp() + 3600),
+        &0,
+    );
     assert!(vault.get_vault(&alice, &0).is_some());
 }
 
@@ -1064,7 +1083,9 @@ fn test_migrate_time_to_ledger_succeeds() {
     vault.migrate_deposit_to_ledger(&admin, &alice, &id, &new_unlock_ledger);
 
     assert!(vault.get_vault(&alice, &id).is_none());
-    let ledger_entry = vault.get_vault_by_ledger(&alice, &id).expect("should exist after migration");
+    let ledger_entry = vault
+        .get_vault_by_ledger(&alice, &id)
+        .expect("should exist after migration");
     assert_eq!(ledger_entry.unlock_ledger, new_unlock_ledger);
     assert_eq!(ledger_entry.amount, 1_000);
 }
@@ -1080,7 +1101,9 @@ fn test_migrate_ledger_to_time_succeeds() {
     vault.migrate_deposit_to_time(&admin, &alice, &id, &new_unlock_time);
 
     assert!(vault.get_vault_by_ledger(&alice, &id).is_none());
-    let time_entry = vault.get_vault(&alice, &id).expect("should exist after migration");
+    let time_entry = vault
+        .get_vault(&alice, &id)
+        .expect("should exist after migration");
     assert_eq!(time_entry.unlock_time, new_unlock_time);
     assert_eq!(time_entry.amount, 1_000);
 }
@@ -1116,7 +1139,9 @@ fn test_migrate_deposit_preserves_amount() {
     let new_unlock_ledger = env.ledger().sequence() + 500;
     vault.migrate_deposit_to_ledger(&admin, &alice, &id, &new_unlock_ledger);
 
-    let entry = vault.get_vault_by_ledger(&alice, &id).expect("should exist after migration");
+    let entry = vault
+        .get_vault_by_ledger(&alice, &id)
+        .expect("should exist after migration");
     assert_eq!(entry.amount, 5_000);
     assert_eq!(entry.penalty_bps, 500);
 }
@@ -1128,7 +1153,14 @@ fn test_migrate_deposit_preserves_amount() {
 fn setup_with_limits(
     max_deposit: Option<i128>,
     max_lock_secs: Option<u64>,
-) -> (Env, TimeLockVaultClient<'static>, Address, Address, Address, Address) {
+) -> (
+    Env,
+    TimeLockVaultClient<'static>,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -1375,5 +1407,3 @@ fn test_emergency_withdraw_ledger_non_admin_fails() {
         Err(Ok(VaultError::Unauthorized))
     );
 }
-// Add to test.rs temporarily
-#[test]

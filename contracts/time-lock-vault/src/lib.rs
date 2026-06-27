@@ -16,9 +16,10 @@ mod storage;
 mod types;
 
 pub use constants::{
-    BUMP_TARGET, BUMP_THRESHOLD, LEDGER_SECONDS, MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT,
-    MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS,
+    MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS,
 };
+
+pub use storage::{BUMP_TARGET, BUMP_THRESHOLD, LEDGER_SECONDS};
 
 pub use contract::TimeLockVault;
 pub use contract::TimeLockVaultClient;
@@ -26,7 +27,7 @@ pub use types::WithdrawResult;
 
 pub use errors::VaultError;
 
-pub use types::{LedgerVaultEntry, VaultEntry, VaultKey};
+pub use types::{LedgerVaultEntry, VaultEntry, VaultInfo, VaultKey, VaultStatus};
 
 #[cfg(test)]
 mod test;

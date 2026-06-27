@@ -84,9 +84,9 @@ The contract supports two deposit modes:
 | Timestamp | `deposit`, `deposit_for` | `env.ledger().timestamp() >= unlock_time` | `VaultEntry` (unlock_time: u64 Unix seconds) |
 | Ledger sequence | `deposit_by_ledger` | `env.ledger().sequence() >= unlock_ledger` | `LedgerVaultEntry` (unlock_ledger: u32) |
 
-Use timestamp mode for human-readable calendar deadlines. Use ledger-sequence mode when you need deterministic block-count-based locks without clock-skew exposure. Note that `deposit_by_ledger` does **not** check the contract pause state.
+Use timestamp mode for human-readable calendar deadlines. Use ledger-sequence mode when you need deterministic block-count-based locks without clock-skew exposure.
 
-`withdraw` transparently handles both modes: it first looks for a timestamp entry, then a ledger entry for the same `(depositor, deposit_id)` key.
+All withdrawal and cancellation paths (`withdraw`, `withdraw_to`, `cancel_deposit`, `emergency_withdraw`, `batch_emergency_withdraw`) transparently handle both modes: they first look for a timestamp entry, then a ledger entry for the same `(depositor, deposit_id)` key.
 
 ### Storage Layout
 
@@ -629,8 +629,6 @@ make smoke-test-local
 |---|---|
 | Multiple deposits per address supported | Each `deposit` call returns a new `deposit_id`. Use `get_deposit_ids` to list all active IDs. |
 | No partial withdrawals | The full locked amount is returned in one call. |
-| `cancel_deposit` / `withdraw_to` / `emergency_withdraw` are timestamp-only | These functions do not handle ledger-based deposits. Use `withdraw` for ledger deposits. |
-| `is_paused` check only on timestamp deposits | `deposit_by_ledger` does not check the pause flag. |
 | Single admin address | Admin is one key — no multisig or DAO governance. Use `renounce_admin` to go fully trustless. |
 | `MAX_BATCH_SIZE` = 20 | `get_vault_batch` accepts at most 20 depositors per call. |
 
