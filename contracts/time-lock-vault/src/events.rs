@@ -96,16 +96,16 @@ pub fn unpaused(env: &Env, admin: &Address) {
 }
 
 pub fn frozen(env: &Env, admin: &Address, depositor: &Address) {
-    let topics = (symbol_short!("frozen"), admin.clone());
-    env.events().publish(topics, depositor.clone());
+    let topics = (symbol_short!("frozen"), admin.clone(), depositor.clone());
+    env.events().publish(topics, ());
 }
 
 pub fn unfrozen(env: &Env, admin: &Address, depositor: &Address) {
-    let topics = (symbol_short!("unfrozen"), admin.clone());
-    env.events().publish(topics, depositor.clone());
+    let topics = (symbol_short!("unfrozen"), admin.clone(), depositor.clone());
+    env.events().publish(topics, ());
 }
 
-pub fn migrated(env: &Env, depositor: &Address, deposit_id: u32, from_time: bool, to_time: bool) {
+pub fn migrated(env: &Env, depositor: &Address, deposit_id: u32, to_ledger: bool, to_time: bool) {
     let topics = (symbol_short!("migrated"), depositor.clone());
-    env.events().publish(topics, (deposit_id, from_time, to_time));
+    env.events().publish(topics, (deposit_id, to_ledger, to_time));
 }
