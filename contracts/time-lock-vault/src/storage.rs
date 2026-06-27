@@ -476,3 +476,25 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     }
     page
 }
+
+// ----------------------------------------------------------------
+//  Paused flag helpers (issue #333)
+// ----------------------------------------------------------------
+
+/// Sets the contract pause state. When `true`, new deposits are rejected.
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage()
+        .persistent()
+        .set(&VaultKey::Paused, &paused);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+/// Returns `true` if the contract is currently paused.
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .persistent()
+        .get::<VaultKey, bool>(&VaultKey::Paused)
+        .unwrap_or(false)
+}
