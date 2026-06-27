@@ -173,8 +173,8 @@ Locks `amount` of `token` until `unlock_time` (Unix seconds) and returns a uniqu
 
 Each depositor can create multiple active deposits. The returned `deposit_id` must be used for later `withdraw`, `cancel_deposit`, or `get_vault` calls.
 
-#### `cancel_deposit(depositor)`
-Cancels an active deposit before the unlock time. The penalty (`penalty_bps` set at deposit time) is sent to the `fee_recipient`; the remainder is returned to the depositor. Fails with `FundsStillLocked` if the vault is already past its unlock time (use `withdraw` instead).
+#### `deposit_for(payer, depositor, token, amount, unlock_time, penalty_bps)`
+Locks `amount` of `token` on behalf of `depositor`. The authenticated `payer` funds the deposit, while `depositor` remains the beneficiary.
 
 Same as `deposit` but unlocks at `unlock_ledger` (ledger sequence number) instead of a Unix timestamp. Returns a `deposit_id`. Subject to the same pause/freeze and amount/penalty validations.
 
@@ -204,7 +204,13 @@ Same as `withdraw` but transfers funds to `recipient` instead of `depositor`. Us
 
 Cancels an active deposit before its unlock time. The `penalty_bps` fraction goes to the `fee_recipient`; the remainder is returned to the depositor. Blocked while the depositor is frozen. Fails with `FundsAlreadyUnlocked` if the vault is past its unlock time (use `withdraw` instead).
 
----
+| Param | Type | Constraint |
+|---|---|---|
+| `depositor` | `Address` | Must sign |
+| `token` | `Address` | SEP-41 token contract |
+| `amount` | `i128` | `0 < amount ≤ 10^15` |
+| `unlock_ledger` | `u32` | `current_ledger < unlock_ledger` |
+| `penalty_bps` | `u32` | `0–10000` |
 
 ### Admin Functions
 
@@ -437,7 +443,7 @@ TTL is bumped on every **write**. Read-only query functions (`get_vault`, `time_
 | 2 | `UnlockTimeNotInFuture` | `unlock_time` â‰¤ current ledger time |
 | 3 | `NoDepositFound` | No active deposit for this address |
 | 4 | `FundsStillLocked` | Lock period not yet expired |
-| 5 | `DepositAlreadyExists` | Must withdraw before re-depositing |
+| 5 | `DepositAlreadyExists` | Reserved error code |
 | 6 | `LockDurationTooLong` | Lock period exceeds 5 years |
 | 7 | `Unauthorized` | Caller is not the admin |
 | 8 | `AmountTooLarge` | Amount exceeds 10^15 |
