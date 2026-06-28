@@ -452,7 +452,7 @@ All entries use **Persistent Storage** with TTL bump threshold ≈ 30 days (`BUM
 
 `LedgerVaultEntry` fields: `token: Address`, `amount: i128`, `unlock_ledger: u32`, `depositor: Address`, `penalty_bps: u32`.
 
-TTL is bumped on every **write**. Read-only query functions (`get_vault`, `time_remaining`, `get_time`) skip the TTL bump to avoid charging callers extra fees.
+TTL is bumped on every **write**. Read-only query functions skip the TTL bump to avoid charging callers extra fees.
 
 ---
 
