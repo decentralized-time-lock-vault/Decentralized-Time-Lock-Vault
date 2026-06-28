@@ -108,6 +108,25 @@ pub fn get_deposit_by_ledger_ids(env: &Env, depositor: &Address) -> Vec<u32> {
     ids
 }
 
+/// Returns ledger-based deposit IDs with a limit to avoid unbounded scans.
+/// This is a bounded alternative to get_deposit_by_ledger_ids for query operations.
+pub fn get_deposit_by_ledger_ids_limited(env: &Env, depositor: &Address, max_results: u32) -> Vec<u32> {
+    let counter_key = VaultKey::DepositCounter(depositor.clone());
+    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
+    let mut ids = Vec::new(env);
+    let limit = count.min(max_results);
+    for id in 0..limit {
+        let key = VaultKey::DepositByLedger(depositor.clone(), id);
+        if env.storage().persistent().has(&key) {
+            ids.push_back(id);
+            if ids.len() >= max_results {
+                break;
+            }
+        }
+    }
+    ids
+}
+
 pub fn get_all_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
     let counter_key = VaultKey::DepositCounter(depositor.clone());
     let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
@@ -117,6 +136,26 @@ pub fn get_all_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
         let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
         if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
             ids.push_back(id);
+        }
+    }
+    ids
+}
+
+/// Returns all deposit IDs with a limit to avoid unbounded scans.
+/// This is a bounded alternative to get_all_deposit_ids for query operations.
+pub fn get_all_deposit_ids_limited(env: &Env, depositor: &Address, max_results: u32) -> Vec<u32> {
+    let counter_key = VaultKey::DepositCounter(depositor.clone());
+    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
+    let mut ids = Vec::new(env);
+    let limit = count.min(max_results);
+    for id in 0..limit {
+        let key_ts = VaultKey::Deposit(depositor.clone(), id);
+        let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
+        if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
+            ids.push_back(id);
+            if ids.len() >= max_results {
+                break;
+            }
         }
     }
     ids
@@ -210,13 +249,6 @@ pub fn remove_admin(env: &Env) {
     env.storage().persistent().remove(&VaultKey::Admin);
 }
 
-pub fn require_admin(env: &Env, caller: &Address) -> Result<(), crate::errors::VaultError> {
-    match get_admin(env) {
-        Some(admin) if admin == *caller => Ok(()),
-        _ => Err(crate::errors::VaultError::Unauthorized),
-    }
-}
-
 pub fn set_pending_admin(env: &Env, pending: &Address) {
     env.storage().persistent().set(&VaultKey::PendingAdmin, pending);
     extend_ttl(env, &VaultKey::PendingAdmin);
@@ -307,22 +339,6 @@ fn get_depositor_at(env: &Env, slot: u32) -> Address {
         .unwrap()
 }
 
-// ----------------------------------------------------------------
-//  Pause state helpers
-// ----------------------------------------------------------------
-
-pub fn set_paused(env: &Env, paused: bool) {
-    env.storage().persistent().set(&VaultKey::Paused, &paused);
-    env.storage()
-        .persistent()
-        .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
-}
-
-pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .persistent()
-        .get::<VaultKey, bool>(&VaultKey::Paused)
-        .unwrap_or(false)
 fn set_depositor_at(env: &Env, slot: u32, addr: &Address) {
     env.storage()
         .persistent()
@@ -502,26 +518,4 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
         page.push_back(get_depositor_at(env, i));
     }
     page
-}
-
-// ----------------------------------------------------------------
-//  Paused flag helpers (issue #333)
-// ----------------------------------------------------------------
-
-/// Sets the contract pause state. When `true`, new deposits are rejected.
-pub fn set_paused(env: &Env, paused: bool) {
-    env.storage()
-        .persistent()
-        .set(&VaultKey::Paused, &paused);
-    env.storage()
-        .persistent()
-        .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
-}
-
-/// Returns `true` if the contract is currently paused.
-pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .persistent()
-        .get::<VaultKey, bool>(&VaultKey::Paused)
-        .unwrap_or(false)
 }
