@@ -27,7 +27,6 @@ pub fn emergency_withdraw(
 }
 
 /// Emitted once per successfully processed depositor inside `batch_emergency_withdraw`.
-/// Same shape as `emergency_withdraw` so event consumers need no special handling.
 pub fn batch_emergency_withdraw_item(
     env: &Env,
     admin: &Address,
@@ -37,6 +36,18 @@ pub fn batch_emergency_withdraw_item(
     unlock_time: u64,
 ) {
     emergency_withdraw(env, admin, depositor, token, amount, unlock_time);
+}
+
+pub fn lock_extended(
+    env: &Env,
+    depositor: &Address,
+    deposit_id: u32,
+    old_unlock_time: u64,
+    new_unlock_time: u64,
+) {
+    let topics = (Symbol::new(env, "lock_ext"), depositor.clone());
+    env.events()
+        .publish(topics, (deposit_id, old_unlock_time, new_unlock_time));
 }
 
 pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admin: &Address) {

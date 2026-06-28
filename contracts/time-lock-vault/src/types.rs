@@ -7,8 +7,10 @@ use soroban_sdk::{contracttype, Address};
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VaultKey {
-    /// Maps depositor → VaultEntry
-    Deposit(Address),
+    /// Maps (depositor, deposit_id) → VaultEntry
+    Deposit(Address, u32),
+    /// Maps depositor → next deposit ID counter
+    DepositCounter(Address),
     /// Contract-level admin address
     Admin,
     PendingAdmin,
