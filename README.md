@@ -10,10 +10,13 @@ A production-ready Soroban smart contract on the Stellar blockchain that locks X
 **Table of Contents**
 - [Overview](#overview)
 - [How It Works](#how-it-works)
+- [Ledger vs Timestamp Deposits](#ledger-vs-timestamp-deposits)
+- [Pause Semantics](#pause-semantics)
 - [Architecture](#architecture)
 - [Contract API](#contract-api)
 - [Security Properties](#security-properties)
 - [Getting Started](#getting-started)
+- [Local Standalone Node Integration Testing](#local-standalone-node-integration-testing)
 - [Deployment Checklist](#deployment-checklist)
 - [Known Limitations](#known-limitations)
 
@@ -29,6 +32,8 @@ A production-ready Soroban smart contract on the Stellar blockchain that locks X
 | Storage | Persistent (per-depositor, per-deposit-id) |
 | Max deposit | 10^15 units (1 quadrillion) |
 | Max lock duration | 5 years |
+| Min lock duration | 60 seconds |
+| Max batch size | 20 depositors per batch call |
 
 ---
 
@@ -419,6 +424,7 @@ All events are emitted via `env.events().publish(topics, data)`.
 | `adm_xfr_init` | `("adm_xfr_init", current_admin)` | `pending_admin` |
 | `adm_xfr_cancel` | `("adm_xfr_cancel", current_admin)` | `pending_admin` |
 | `adm_xfr_done` | `("adm_xfr_done", new_admin)` | `()` |
+| `adm_xfr_cancel` | `("adm_xfr_cancel", admin)` | `pending_admin` |
 | `adm_renounce` | `("adm_renounce", former_admin)` | `()` |
 | `paused` | `("paused", admin)` | `()` |
 | `unpaused` | `("unpaused", admin)` | `()` |
@@ -431,16 +437,18 @@ All `amount` and `penalty` values are `i128` token units. `deposit_id` is a `u32
 
 All entries use **Persistent Storage** with TTL bump threshold ≈ 30 days (`BUMP_THRESHOLD = 518_400` ledgers) and target ≈ 5.2 years (`BUMP_TARGET` derived from `MAX_LOCK_DURATION_SECS / 5s`).
 
-| Key | Type | Lifetime |
+| Key | Value Type | Lifetime |
 |---|---|---|
 | `VaultKey::Admin` | `Address` | Set on `initialize`; removed on `renounce_admin` |
 | `VaultKey::PendingAdmin` | `Address` | Set by `transfer_admin`; cleared by `accept_admin` / `cancel_transfer_admin` |
 | `VaultKey::Initialized` | `bool` | Set once on `initialize`; never removed |
 | `VaultKey::Paused` | `bool` | Set by `pause`/`unpause`; absent means not paused |
 | `VaultKey::FeeRecipient` | `Address` | Set on `initialize`; never removed |
-| `VaultKey::MaxDeposit` | `i128` | Set on `initialize` if overridden; absent means use compile-time default |
-| `VaultKey::MaxLockSecs` | `u64` | Set on `initialize` if overridden; absent means use compile-time default |
-| `VaultKey::DepositCounter(depositor)` | `u32` | Incremented on each `deposit`; never decremented |
+| `VaultKey::Paused` | `bool` | Toggled by `pause`/`unpause`; absent → false |
+| `VaultKey::MaxDeposit` | `i128` | Set on `initialize` if overridden; absent → compile-time default |
+| `VaultKey::MaxLockSecs` | `u64` | Set on `initialize` if overridden; absent → compile-time default |
+| `VaultKey::DepositCounter(depositor)` | `u32` | Incremented on each deposit; never decremented |
+| `VaultKey::ActiveDepositIds(depositor)` | `Vec<u32>` | Updated on deposit and removal; absent → empty |
 | `VaultKey::Deposit(depositor, id)` | `VaultEntry` | Created on `deposit`; removed on `withdraw` / `emergency_withdraw` / `cancel_deposit` |
 | `VaultKey::ActiveDepositIds(depositor)` | `Vec<u32>` | Active deposit IDs for a depositor |
 | `VaultKey::ActiveDepositCount(depositor)` | `u32` | Active deposit count for a depositor |
@@ -523,7 +531,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Add WASM target
 rustup target add wasm32-unknown-unknown
 
-# Install Soroban CLI
+# Install Soroban CLI (also installs the stellar CLI)
 cargo install --locked soroban-cli
 
 # Install cargo-watch (optional, for make watch)
@@ -606,17 +614,72 @@ make deploy-testnet
 
 ```bash
 make smoke-test-local
+
+# Or invoke the script directly:
+bash scripts/smoke_test_local.sh
 ```
+
+### What the smoke test does
+
+The script (`scripts/smoke_test_local.sh`) exercises the full deposit → query → withdraw lifecycle:
+
+| Step | Action | What is verified |
+|---|---|---|
+| 1 | Check WASM exists | Fails fast if `make build` was not run |
+| 2 | `stellar network start local --background` | Local node is up and listening |
+| 3 | `stellar keys generate --fund` | A funded test identity is created |
+| 4 | `stellar contract deploy` | Contract deploys successfully; a contract ID is returned |
+| 5 | `initialize(admin, ...)` | Contract accepts the init call without error |
+| 6 | `stellar contract asset deploy --asset native` | Native XLM is wrapped as a SEP-41 token |
+| 7 | `deposit(depositor, token, 1000, now+120s, penalty_bps=0)` | Deposit returns a `deposit_id`; token balance decreases |
+| 8 | `get_vault(depositor, 0)` | Returned entry contains `amount = 1000` |
+| 9 | `time_remaining(depositor, 0)` | Returns > 0 (lock has not expired) |
+| 10 | `withdraw(depositor, 0)` | Fails with `FundsStillLocked` (asserts error string) |
+| EXIT | `stellar network stop local` | Node is shut down cleanly via `trap` |
+
+### Expected output
+
+```
+==> Checking WASM...
+  ✓ WASM found: target/wasm32-unknown-unknown/release/time_lock_vault.wasm
+==> Starting local Soroban node...
+  ✓ Local node started
+==> Setting up identity...
+  ✓ Identity: GABC...XYZ
+==> Deploying contract...
+  ✓ Contract deployed: CCCC...AAAA
+==> Calling initialize...
+  ✓ initialize OK
+==> Wrapping native XLM...
+  ✓ Token: CDDD...BBBB
+==> Calling deposit...
+  ✓ deposit OK
+==> Calling get_vault...
+  ✓ get_vault returns amount 1000
+==> Calling time_remaining...
+  ✓ time_remaining > 0 (119)
+==> Calling withdraw (expect FundsStillLocked)...
+  ✓ withdraw fails while locked
+
+All smoke tests passed.
+==> Stopping local node...
+```
+
+### Extending the smoke test
+
+To add assertions for additional contract functions, edit `scripts/smoke_test_local.sh`. The `assert_contains` helper makes it easy:
 
 ---
 
 ## ✈️ Deployment Checklist
 
 - [ ] Deploy and call `initialize` in the same transaction to prevent front-running
+- [ ] Pass the correct `fee_recipient` address to `initialize` (receives early-exit penalties)
 - [ ] Verify `get_admin` returns the expected admin address
 - [ ] Verify `is_initialized` returns `true`
 - [ ] Run `get_constants` to confirm `MAX_DEPOSIT_AMOUNT` and `MAX_LOCK_DURATION_SECS` match intended parameters
 - [ ] Verify `get_fee_recipient` returns the correct fee recipient address
+- [ ] Run `is_initialized` to confirm the contract initialized successfully
 - [ ] Consider calling `renounce_admin` for fully trustless operation once setup is complete
 - [ ] Monitor storage TTL for long-duration vaults — entries are bumped on write but not on read
 - [ ] Confirm the optimized WASM size is within the Stellar network limit (`make check-wasm-size`)
@@ -659,6 +722,7 @@ The suite (`contracts/time-lock-vault/src/test.rs`) contains 48+ tests covering:
 | Deposit | Valid deposits, `deposit_for`, `deposit_by_ledger`, amount/time boundary checks |
 | Withdraw | Successful withdrawal, early withdrawal rejection, `withdraw_to`, ledger-based withdraw |
 | Cancel deposit | Penalty calculation, fee recipient transfer, post-unlock rejection |
+| Pause / Unpause | Deposit blocked while paused; withdraw unaffected |
 | Admin | `transfer_admin`, `accept_admin`, `cancel_transfer_admin`, `renounce_admin` |
 | Pause / Unpause | Deposit blocked while paused, withdrawal unaffected, `is_paused` query |
 | Emergency withdraw | Admin-only access, funds always go to depositor |
