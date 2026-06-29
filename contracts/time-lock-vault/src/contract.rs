@@ -3,6 +3,9 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 use crate::{
     constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, LEDGER_SECONDS},
     errors::VaultError,
+    events,
+    storage,
+    types::{VaultEntry, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MAX_PAGE_LIMIT},
     events, storage,
     types::{LedgerVaultEntry, VaultEntry, VaultInfo, VaultStatus, WithdrawResult},
 };
@@ -129,6 +132,8 @@ impl TimeLockVault {
             depositor: depositor.clone(),
             penalty_bps,
         };
+        storage::set_deposit(&env, &depositor, &entry);
+        storage::add_to_depositor_index(&env, &depositor);
 
         // Maintain global depositor list
         storage::set_deposit(&env, &depositor, deposit_id, &entry);

@@ -1486,3 +1486,119 @@ fn test_ledger_deposit_included_in_deposit_ids() {
     assert_eq!(ids.len(), 1);
     assert_eq!(ids.get(0).unwrap(), 0);
 }
+
+// ================================================================
+//  get_depositors_page — boundary and performance tests
+// ================================================================
+
+/// Helper: mint tokens and deposit for a fresh address.
+fn deposit_for(
+    env: &Env,
+    vault: &TimeLockVaultClient,
+    token: &Address,
+    amount: i128,
+) -> Address {
+    let depositor = Address::generate(env);
+    let asset_client = StellarAssetClient::new(env, token);
+    asset_client.mint(&depositor, &amount);
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&depositor, token, &amount, &unlock_time);
+    depositor
+}
+
+#[test]
+fn test_get_depositors_page_empty() {
+    let (_env, vault, _token, _admin, _alice) = setup();
+    let page = vault.get_depositors_page(&0, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_depositors_page_returns_correct_slice() {
+    let (env, vault, token, _admin, _alice) = setup();
+    let d1 = deposit_for(&env, &vault, &token, 100);
+    let d2 = deposit_for(&env, &vault, &token, 100);
+    let d3 = deposit_for(&env, &vault, &token, 100);
+
+    let page0 = vault.get_depositors_page(&0, &2);
+    assert_eq!(page0.len(), 2);
+    assert_eq!(page0.get(0).unwrap(), d1);
+    assert_eq!(page0.get(1).unwrap(), d2);
+
+    let page1 = vault.get_depositors_page(&1, &2);
+    assert_eq!(page1.len(), 1);
+    assert_eq!(page1.get(0).unwrap(), d3);
+}
+
+#[test]
+fn test_get_depositors_page_out_of_bounds_returns_empty() {
+    let (env, vault, token, _admin, _alice) = setup();
+    deposit_for(&env, &vault, &token, 100);
+
+    // Page 5 with limit 10 is way beyond the single depositor
+    let page = vault.get_depositors_page(&5, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_depositors_page_limit_capped_at_max() {
+    let (env, vault, token, _admin, _alice) = setup();
+
+    // Deposit MAX_PAGE_LIMIT + 5 entries
+    let total = MAX_PAGE_LIMIT + 5;
+    for _ in 0..total {
+        deposit_for(&env, &vault, &token, 100);
+    }
+
+    // Requesting more than MAX_PAGE_LIMIT is silently capped
+    let page = vault.get_depositors_page(&0, &(MAX_PAGE_LIMIT + 10));
+    assert_eq!(page.len(), MAX_PAGE_LIMIT);
+}
+
+#[test]
+fn test_get_depositors_page_limit_zero_returns_empty() {
+    let (env, vault, token, _admin, _alice) = setup();
+    deposit_for(&env, &vault, &token, 100);
+    let page = vault.get_depositors_page(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_depositor_removed_from_index_after_withdraw() {
+    let (env, vault, token, _admin, _alice) = setup();
+
+    let depositor = deposit_for(&env, &vault, &token, 500);
+
+    // Depositor should be in page 0
+    let before = vault.get_depositors_page(&0, &10);
+    assert_eq!(before.len(), 1);
+    assert_eq!(before.get(0).unwrap(), depositor);
+
+    advance_time(&env, 3601);
+    vault.withdraw(&depositor);
+
+    // Depositor should no longer appear
+    let after = vault.get_depositors_page(&0, &10);
+    assert_eq!(after.len(), 0);
+}
+
+#[test]
+fn test_depositor_removed_from_index_after_emergency_withdraw() {
+    let (env, vault, token, admin, _alice) = setup();
+
+    let depositor = deposit_for(&env, &vault, &token, 500);
+    assert_eq!(vault.get_depositors_page(&0, &10).len(), 1);
+
+    vault.emergency_withdraw(&admin, &depositor);
+    assert_eq!(vault.get_depositors_page(&0, &10).len(), 0);
+}
+
+#[test]
+fn test_get_depositors_page_exact_max_limit() {
+    let (env, vault, token, _admin, _alice) = setup();
+    for _ in 0..MAX_PAGE_LIMIT {
+        deposit_for(&env, &vault, &token, 100);
+    }
+    let page = vault.get_depositors_page(&0, &MAX_PAGE_LIMIT);
+    assert_eq!(page.len(), MAX_PAGE_LIMIT);
+}
