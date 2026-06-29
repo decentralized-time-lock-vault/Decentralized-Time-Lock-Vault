@@ -47,7 +47,6 @@ use crate::constants::MAX_LOCK_DURATION_SECS;
 use crate::types::{LedgerVaultEntry, VaultEntry, VaultKey};
 
 pub const LEDGER_SECONDS: u64 = 5;
-
 pub const BUMP_THRESHOLD: u32 = 518_400;
 
 /// Target TTL (in ledgers) applied by every `extend_ttl` call.
@@ -59,14 +58,14 @@ pub const BUMP_TARGET: u32 = ((MAX_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LE
 //  TTL helper
 // ----------------------------------------------------------------
 
-pub fn extend_ttl(env: &Env, key: &VaultKey) {
+fn extend_ttl(env: &Env, key: &VaultKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
 // ----------------------------------------------------------------
-//  Deposit counter helpers
+//  Deposit counter / ID tracking
 // ----------------------------------------------------------------
 
 /// Returns the next deposit ID for `depositor` (starting at 0) and increments
@@ -77,8 +76,7 @@ pub fn extend_ttl(env: &Env, key: &VaultKey) {
 pub fn next_deposit_id(env: &Env, depositor: &Address) -> u32 {
     let key = VaultKey::DepositCounter(depositor.clone());
     let id: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-    let next = id + 1;
-    env.storage().persistent().set(&key, &next);
+    env.storage().persistent().set(&key, &(id + 1));
     extend_ttl(env, &key);
     id
 }
@@ -132,22 +130,28 @@ fn remove_active_deposit_id(env: &Env, depositor: &Address, deposit_id: u32) {
     }
 }
 
-/// Returns true if `depositor` has at least one active deposit.
-/// Uses the `ActiveDepositCount` counter maintained alongside deposit ids.
-pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
-    let active_key = VaultKey::ActiveDepositCount(depositor.clone());
-    let active: u32 = env.storage().persistent().get(&active_key).unwrap_or(0);
-    active > 0
-}
-
-pub fn inc_active_count(env: &Env, depositor: &Address) {
+fn inc_active_count(env: &Env, depositor: &Address) {
     let key = VaultKey::ActiveDepositCount(depositor.clone());
     let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     env.storage().persistent().set(&key, &(count + 1));
-    env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
-pub fn dec_active_count(env: &Env, depositor: &Address) {
+fn dec_active_count(env: &Env, depositor: &Address) {
+    let key = VaultKey::ActiveDepositCount(depositor.clone());
+    let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&key, &count.saturating_sub(1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+}
+
+/// Returns true if `depositor` has at least one active deposit in either store.
+pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
     let key = VaultKey::ActiveDepositCount(depositor.clone());
     let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     let new_count = count.saturating_sub(1);
@@ -235,9 +239,6 @@ pub fn set_deposit(env: &Env, depositor: &Address, deposit_id: u32, entry: &Vaul
     inc_active_count(env, depositor);
 }
 
-/// Retrieve the vault entry for `depositor` — does NOT bump TTL.
-/// Use this for all reads (writes/mutations as well as view functions)
-/// since mutations that follow will either remove the entry or replace it.
 pub fn get_deposit(env: &Env, depositor: &Address, deposit_id: u32) -> Option<VaultEntry> {
     let key = VaultKey::Deposit(depositor.clone(), deposit_id);
     let entry: Option<VaultEntry> = env.storage().persistent().get(&key);
@@ -361,20 +362,15 @@ pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage().persistent().get(&VaultKey::Admin)
 }
 
-pub fn require_admin(env: &Env, caller: &Address) -> Result<(), crate::errors::VaultError> {
-    match get_admin(env) {
-        Some(admin) if admin == *caller => Ok(()),
-        _ => Err(crate::errors::VaultError::Unauthorized),
-    }
-}
-
 pub fn remove_admin(env: &Env) {
     env.storage().persistent().remove(&VaultKey::Admin);
 }
 
 /// Sets the pending admin during a two-step transfer. Key: `VaultKey::PendingAdmin`.
 pub fn set_pending_admin(env: &Env, pending: &Address) {
-    env.storage().persistent().set(&VaultKey::PendingAdmin, pending);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::PendingAdmin, pending);
     extend_ttl(env, &VaultKey::PendingAdmin);
 }
 
@@ -396,7 +392,9 @@ pub fn remove_pending_admin(env: &Env) {
 /// Marks the contract as initialized. Written once by `initialize`; never removed.
 /// Guards against re-initialization by a different caller.
 pub fn set_initialized(env: &Env) {
-    env.storage().persistent().set(&VaultKey::Initialized, &true);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::Initialized, &true);
     extend_ttl(env, &VaultKey::Initialized);
 }
 
@@ -410,7 +408,7 @@ pub fn is_initialized(env: &Env) -> bool {
 }
 
 // ----------------------------------------------------------------
-//  Runtime limits helpers
+//  Runtime limit helpers
 // ----------------------------------------------------------------
 
 /// Persists a deployment-specific maximum deposit amount.
@@ -441,7 +439,9 @@ pub fn get_max_lock_secs(env: &Env) -> Option<u64> {
 // ----------------------------------------------------------------
 
 pub fn set_fee_recipient(env: &Env, recipient: &Address) {
-    env.storage().persistent().set(&VaultKey::FeeRecipient, recipient);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::FeeRecipient, recipient);
     extend_ttl(env, &VaultKey::FeeRecipient);
 }
 
@@ -452,7 +452,6 @@ pub fn get_fee_recipient(env: &Env) -> Option<Address> {
 // ----------------------------------------------------------------
 //  Depositor index helpers
 // ----------------------------------------------------------------
-
 
 fn get_depositor_count_raw(env: &Env) -> u32 {
     env.storage()
@@ -507,7 +506,6 @@ fn remove_depositor_slot(env: &Env, addr: &Address) {
         .remove(&VaultKey::DepositorIndex(addr.clone()));
 }
 
-
 pub fn add_depositor(env: &Env, depositor: &Address) {
     let member_key = VaultKey::DepositorMember(depositor.clone());
     if env.storage().persistent().has(&member_key) {
@@ -522,12 +520,16 @@ pub fn add_depositor(env: &Env, depositor: &Address) {
     set_depositor_at(env, count, depositor);
     set_depositor_slot(env, depositor, count);
     set_depositor_count(env, count + 1);
-
 }
 
 /// Removes `depositor` from the global depositor list.
 /// Called when the depositor's last active deposit is withdrawn or cancelled.
 pub fn remove_depositor(env: &Env, depositor: &Address) {
+    // Guard: don't remove if deposits remain in either store.
+    if has_any_deposit(env, depositor) {
+        return;
+    }
+
     let count = get_depositor_count_raw(env);
     if count == 0 {
         return;
@@ -547,9 +549,7 @@ pub fn remove_depositor(env: &Env, depositor: &Address) {
     set_depositor_count(env, last);
 
     let member_key = VaultKey::DepositorMember(depositor.clone());
-    if env.storage().persistent().has(&member_key) {
-        env.storage().persistent().remove(&member_key);
-    }
+    env.storage().persistent().remove(&member_key);
 }
 
 /// Returns the total number of addresses with at least one active deposit.
@@ -557,15 +557,29 @@ pub fn get_depositor_count(env: &Env) -> u32 {
     get_depositor_count_raw(env)
 }
 
+pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
+    let count = get_depositor_count_raw(env);
+    let mut page: Vec<Address> = Vec::new(env);
+    let end = (offset.saturating_add(limit)).min(count);
+    for i in offset..end {
+        page.push_back(get_depositor_at(env, i));
+    }
+    page
+}
+
 // ----------------------------------------------------------------
-//  Paused flag helpers
+//  Pause state helpers
 // ----------------------------------------------------------------
 
 /// Sets the contract pause state. Key: `VaultKey::Paused`.
 /// When `true`, `deposit` and `deposit_for` reject new deposits with `ContractPaused`.
 pub fn set_paused(env: &Env, paused: bool) {
-    env.storage().persistent().set(&VaultKey::Paused, &paused);
-    extend_ttl(env, &VaultKey::Paused);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::Paused, &paused);
+    env.storage()
+        .persistent()
+        .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
 /// Returns `true` if the contract is paused. Absent key treated as `false`.
@@ -589,20 +603,20 @@ pub fn set_frozen(env: &Env, depositor: &Address) {
 }
 
 pub fn is_frozen(env: &Env, depositor: &Address) -> bool {
-    let key = VaultKey::DepositorFrozen(depositor.clone());
     env.storage()
         .persistent()
-        .get::<VaultKey, bool>(&key)
+        .get::<VaultKey, bool>(&VaultKey::DepositorFrozen(depositor.clone()))
         .unwrap_or(false)
 }
 
 pub fn remove_frozen(env: &Env, depositor: &Address) {
-    let key = VaultKey::DepositorFrozen(depositor.clone());
-    env.storage().persistent().remove(&key);
+    env.storage()
+        .persistent()
+        .remove(&VaultKey::DepositorFrozen(depositor.clone()));
 }
 
 // ----------------------------------------------------------------
-//  Token freeze helpers (#331)
+//  Token freeze helpers
 // ----------------------------------------------------------------
 
 pub fn set_token_frozen(env: &Env, token: &Address) {
@@ -627,27 +641,27 @@ pub fn remove_token_frozen(env: &Env, token: &Address) {
 }
 
 // ----------------------------------------------------------------
-//  Penalty cap / fee rule helpers (#332)
+//  Penalty cap / fee rule helpers
 // ----------------------------------------------------------------
 
-/// Set the global maximum penalty basis points cap (0–10000).
 pub fn set_max_penalty_bps(env: &Env, bps: u32) {
-    env.storage().persistent().set(&VaultKey::MaxPenaltyBps, &bps);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::MaxPenaltyBps, &bps);
     extend_ttl(env, &VaultKey::MaxPenaltyBps);
 }
 
-/// Returns the configured max penalty bps, or None (no cap beyond 10000).
 pub fn get_max_penalty_bps(env: &Env) -> Option<u32> {
     env.storage().persistent().get(&VaultKey::MaxPenaltyBps)
 }
 
-/// Set the minimum flat cancel fee in token units (absolute amount, not bps).
 pub fn set_min_cancel_fee(env: &Env, fee: i128) {
-    env.storage().persistent().set(&VaultKey::MinCancelFee, &fee);
+    env.storage()
+        .persistent()
+        .set(&VaultKey::MinCancelFee, &fee);
     extend_ttl(env, &VaultKey::MinCancelFee);
 }
 
-/// Returns the configured minimum cancel fee, or None (no floor).
 pub fn get_min_cancel_fee(env: &Env) -> Option<i128> {
     env.storage().persistent().get(&VaultKey::MinCancelFee)
 }
