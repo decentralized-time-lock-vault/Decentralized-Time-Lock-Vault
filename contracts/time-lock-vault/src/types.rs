@@ -6,10 +6,8 @@ pub enum VaultKey {
     Deposit(Address, u32),
     DepositByLedger(Address, u32),
     DepositCounter(Address),
-    ActiveDepositIds(Address),
     ActiveDepositCount(Address),
     Admin,
-    /// Pending admin during a two-step transfer
     PendingAdmin,
     Initialized,
     DepositorMember(Address),
@@ -19,7 +17,6 @@ pub enum VaultKey {
     FeeRecipient,
     MaxDeposit,
     MaxLockSecs,
-    /// Flag indicating whether deposits are paused
     Paused,
     DepositorFrozen(Address),
     TokenFrozen(Address),
