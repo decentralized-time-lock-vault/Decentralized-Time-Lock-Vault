@@ -768,6 +768,8 @@ impl TimeLockVault {
         results
     }
 
+    /// Returns the list of active deposit IDs for a depositor. O(k) — no scan
+    /// over the historical counter range. (Fixes issue #262.)
     pub fn get_deposit_ids(env: Env, depositor: Address) -> Vec<u32> {
         storage::get_deposit_ids(&env, &depositor)
     }

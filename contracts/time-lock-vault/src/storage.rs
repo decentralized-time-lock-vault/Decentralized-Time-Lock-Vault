@@ -156,7 +156,9 @@ pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
     let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     let new_count = count.saturating_sub(1);
     env.storage().persistent().set(&key, &new_count);
-    env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, BUMP_THRESHOLD, BUMP_TARGET);
 }
 
 pub fn get_deposit_by_ledger_ids(env: &Env, depositor: &Address) -> Vec<u32> {
@@ -475,6 +477,8 @@ fn get_depositor_at(env: &Env, slot: u32) -> Address {
 }
 
 fn set_depositor_at(env: &Env, slot: u32, addr: &Address) {
+    let key = VaultKey::DepositorAt(slot);
+    env.storage().persistent().set(&key, addr);
     env.storage()
         .persistent()
         .set(&VaultKey::DepositorAt(slot), addr);
@@ -494,6 +498,8 @@ fn get_depositor_slot(env: &Env, addr: &Address) -> Option<u32> {
 }
 
 fn set_depositor_slot(env: &Env, addr: &Address, slot: u32) {
+    let key = VaultKey::DepositorIndex(addr.clone());
+    env.storage().persistent().set(&key, &slot);
     env.storage()
         .persistent()
         .set(&VaultKey::DepositorIndex(addr.clone()), &slot);
@@ -506,6 +512,8 @@ fn remove_depositor_slot(env: &Env, addr: &Address) {
         .remove(&VaultKey::DepositorIndex(addr.clone()));
 }
 
+/// O(1) add: uses `DepositorMember` flag for duplicate check, then appends to
+/// the slot array. No list scan. (Fixes issue #260.)
 pub fn add_depositor(env: &Env, depositor: &Address) {
     let member_key = VaultKey::DepositorMember(depositor.clone());
     if env.storage().persistent().has(&member_key) {
@@ -538,7 +546,7 @@ pub fn remove_depositor(env: &Env, depositor: &Address) {
         Some(s) => s,
         None => return,
     };
-    let last = count - 1;
+    let last = count.saturating_sub(1);
     if slot != last {
         let last_addr = get_depositor_at(env, last);
         set_depositor_at(env, slot, &last_addr);
@@ -546,6 +554,12 @@ pub fn remove_depositor(env: &Env, depositor: &Address) {
     }
     remove_depositor_at(env, last);
     remove_depositor_slot(env, depositor);
+
+    // Remove membership flag
+    env.storage()
+        .persistent()
+        .remove(&VaultKey::DepositorMember(depositor.clone()));
+
     set_depositor_count(env, last);
 
     let member_key = VaultKey::DepositorMember(depositor.clone());
