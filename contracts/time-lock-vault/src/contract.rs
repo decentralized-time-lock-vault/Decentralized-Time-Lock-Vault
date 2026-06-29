@@ -23,13 +23,6 @@ impl TimeLockVault {
 
     /// Initialize the contract with an admin address and fee recipient.
     /// Must be called once immediately after deployment.
-    ///
-    /// # Arguments
-    /// * `admin`         — Address that gains emergency-withdrawal and admin privileges.
-    /// * `fee_recipient` — Address that receives penalty fees on early cancellation.
-    ///
-    /// # Errors
-    /// * `Unauthorized` — Contract has already been initialized.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -829,6 +822,10 @@ impl TimeLockVault {
         // from deposit events, or use next_deposit_id - 1 to find the latest.
         let _depositor = depositor; // param kept for ABI compatibility
         Vec::new(&env)
+    }
+
+    pub fn has_deposit(env: Env, depositor: Address) -> bool {
+        storage::get_active_deposit_id(&env, &depositor).is_some()
     }
 
     pub fn get_time(env: Env) -> u64 {

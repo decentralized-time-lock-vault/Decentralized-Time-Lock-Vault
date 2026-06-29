@@ -355,7 +355,6 @@ pub fn set_admin(env: &Env, admin: &Address) {
     extend_ttl(env, &VaultKey::Admin);
 }
 
-/// Returns the current admin address, or `None` if admin has been renounced.
 pub fn get_admin(env: &Env) -> Option<Address> {
     env.storage().persistent().get(&VaultKey::Admin)
 }
