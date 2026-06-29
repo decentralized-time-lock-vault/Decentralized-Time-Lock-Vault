@@ -10,61 +10,6 @@ pub fn withdraw(env: &Env, depositor: &Address, token: &Address, deposit_id: u32
     env.events().publish(topics, (deposit_id, amount));
 }
 
-pub fn emergency_withdraw(
-    env: &Env,
-    admin: &Address,
-    depositor: &Address,
-    token: &Address,
-    deposit_id: u32,
-    amount: i128,
-) {
-    // admin is placed in the data payload rather than topics to avoid
-    // leaking the admin address in the publicly-indexed event topic stream.
-    let topics = (Symbol::new(env, "emrg_wdraw"), depositor.clone());
-    env.events()
-        .publish(topics, (deposit_id, admin.clone(), token.clone(), amount));
-}
-
-pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_xfr_init"), current_admin.clone());
-    env.events().publish(topics, pending_admin.clone());
-}
-
-pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, pending_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_xfr_cancel"), current_admin.clone());
-    env.events().publish(topics, pending_admin.clone());
-}
-
-pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_xfr_done"), new_admin.clone());
-    env.events().publish(topics, ());
-}
-
-pub fn admin_renounced(env: &Env, former_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_renounce"), former_admin.clone());
-    env.events().publish(topics, ());
-}
-
-pub fn lock_extended(
-    env: &Env,
-    depositor: &Address,
-    old_unlock_time: u64,
-    new_unlock_time: u64,
-) {
-    let topics = (Symbol::new(env, "lock_extended"), depositor.clone());
-    env.events().publish(topics, (old_unlock_time, new_unlock_time));
-}
-
-pub fn paused(env: &Env, admin: &Address) {
-    let topics = (Symbol::new(env, "paused"), admin.clone());
-    env.events().publish(topics, ());
-}
-
-pub fn unpaused(env: &Env, admin: &Address) {
-    let topics = (Symbol::new(env, "unpaused"), admin.clone());
-    env.events().publish(topics, ());
-}
-
 pub fn withdraw_to(
     env: &Env,
     depositor: &Address,
@@ -82,6 +27,25 @@ pub fn withdraw_to(
     env.events().publish(topics, (deposit_id, amount));
 }
 
+pub fn withdraw_to(env: &Env, depositor: &Address, recipient: &Address, token: &Address, amount: i128) {
+    let topics = (Symbol::new(env, "withdraw_to"), depositor.clone(), token.clone());
+    env.events().publish(topics, (recipient.clone(), amount));
+}
+
+pub fn emergency_withdraw(
+    env: &Env,
+    admin: &Address,
+    depositor: &Address,
+    deposit_id: u32,
+    token: &Address,
+    deposit_id: u32,
+    amount: i128,
+) {
+    let topics = (Symbol::new(env, "emrg_wdraw"), depositor.clone());
+    env.events()
+        .publish(topics, (deposit_id, admin.clone(), token.clone(), amount));
+}
+
 pub fn deposit_cancelled(
     env: &Env,
     depositor: &Address,
@@ -97,9 +61,69 @@ pub fn deposit_cancelled(
     env.events().publish(topics, (amount, penalty));
 }
 
-pub fn withdraw_to(env: &Env, depositor: &Address, recipient: &Address, token: &Address, deposit_id: u32, amount: i128) {
-    let topics = (Symbol::new(env, "withdraw_to"), depositor.clone(), token.clone());
-    env.events().publish(topics, (deposit_id, recipient.clone(), amount));
+pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_xfr_init"), current_admin.clone());
+    env.events().publish(topics, pending_admin.clone());
+}
+
+pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, pending_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_xfr_cancel"), current_admin.clone());
+    env.events().publish(topics, pending_admin.clone());
+}
+
+pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_xfr_done"),);
+    env.events().publish(topics, new_admin.clone());
+}
+
+pub fn admin_renounced(env: &Env, former_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_renounce"),);
+    env.events().publish(topics, former_admin.clone());
+}
+
+pub fn paused(env: &Env, admin: &Address) {
+    let topics = (Symbol::new(env, "paused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn unpaused(env: &Env, admin: &Address) {
+    let topics = (Symbol::new(env, "unpaused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn lock_extended(
+    env: &Env,
+    depositor: &Address,
+    old_unlock_time: u64,
+    new_unlock_time: u64,
+) {
+    let topics = (Symbol::new(env, "lock_extended"), depositor.clone());
+    env.events().publish(topics, (old_unlock_time, new_unlock_time));
+}
+
+pub fn paused(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("paused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn unpaused(env: &Env, admin: &Address) {
+    let topics = (symbol_short!("unpaused"), admin.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn frozen(env: &Env, admin: &Address, depositor: &Address) {
+    let topics = (symbol_short!("frozen"), admin.clone(), depositor.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn unfrozen(env: &Env, admin: &Address, depositor: &Address) {
+    let topics = (symbol_short!("unfrozen"), admin.clone(), depositor.clone());
+    env.events().publish(topics, ());
+}
+
+pub fn migrated(env: &Env, depositor: &Address, deposit_id: u32, to_ledger: bool, to_time: bool) {
+    let topics = (symbol_short!("migrated"), depositor.clone());
+    env.events().publish(topics, (deposit_id, to_ledger, to_time));
 }
 
 pub fn paused(env: &Env, admin: &Address) {
