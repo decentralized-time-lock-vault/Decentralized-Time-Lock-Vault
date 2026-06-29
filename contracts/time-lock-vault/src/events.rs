@@ -72,13 +72,13 @@ pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, pending_admi
 }
 
 pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_xfr_done"), new_admin.clone());
-    env.events().publish(topics, ());
+    let topics = (Symbol::new(env, "adm_xfr_done"),);
+    env.events().publish(topics, new_admin.clone());
 }
 
 pub fn admin_renounced(env: &Env, former_admin: &Address) {
-    let topics = (Symbol::new(env, "adm_renounce"), former_admin.clone());
-    env.events().publish(topics, ());
+    let topics = (Symbol::new(env, "adm_renounce"),);
+    env.events().publish(topics, former_admin.clone());
 }
 
 pub fn paused(env: &Env, admin: &Address) {
