@@ -237,7 +237,6 @@ pub fn set_deposit(env: &Env, depositor: &Address, deposit_id: u32, entry: &Vaul
     let key = VaultKey::Deposit(depositor.clone(), deposit_id);
     env.storage().persistent().set(&key, entry);
     extend_ttl(env, &key);
-    add_active_deposit_id(env, depositor, deposit_id);
     inc_active_count(env, depositor);
 }
 
@@ -266,7 +265,6 @@ pub fn remove_deposit(env: &Env, depositor: &Address, deposit_id: u32) {
     env.storage()
         .persistent()
         .remove(&VaultKey::Deposit(depositor.clone(), deposit_id));
-    remove_active_deposit_id(env, depositor, deposit_id);
     dec_active_count(env, depositor);
 }
 
@@ -285,7 +283,6 @@ pub fn set_deposit_by_ledger(env: &Env, depositor: &Address, deposit_id: u32, en
     let key = VaultKey::DepositByLedger(depositor.clone(), deposit_id);
     env.storage().persistent().set(&key, entry);
     extend_ttl(env, &key);
-    add_active_deposit_id(env, depositor, deposit_id);
     inc_active_count(env, depositor);
 }
 
@@ -303,7 +300,6 @@ pub fn remove_deposit_by_ledger(env: &Env, depositor: &Address, deposit_id: u32)
     env.storage()
         .persistent()
         .remove(&VaultKey::DepositByLedger(depositor.clone(), deposit_id));
-    remove_active_deposit_id(env, depositor, deposit_id);
     dec_active_count(env, depositor);
 }
 

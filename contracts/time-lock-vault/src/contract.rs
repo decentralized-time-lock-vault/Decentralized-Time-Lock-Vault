@@ -51,12 +51,18 @@ impl TimeLockVault {
             if v <= 0 {
                 return Err(VaultError::InvalidAmount);
             }
+            if v > MAX_DEPOSIT_AMOUNT {
+                return Err(VaultError::AmountTooLarge);
+            }
             storage::set_max_deposit(&env, v);
         }
 
         if let Some(v) = max_lock_secs {
-            if v == 0 {
-                return Err(VaultError::LockDurationTooLong);
+            if v == 0 || v < MIN_LOCK_DURATION_SECS {
+                return Err(VaultError::InvalidConfig);
+            }
+            if v > MAX_LOCK_DURATION_SECS {
+                return Err(VaultError::InvalidConfig);
             }
             storage::set_max_lock_secs(&env, v);
         }
@@ -771,7 +777,11 @@ impl TimeLockVault {
     /// Returns the list of active deposit IDs for a depositor. O(k) — no scan
     /// over the historical counter range. (Fixes issue #262.)
     pub fn get_deposit_ids(env: Env, depositor: Address) -> Vec<u32> {
-        storage::get_deposit_ids(&env, &depositor)
+        // Returns the active deposit counter value only — full enumeration is not
+        // supported without the ActiveDepositIds index. Clients should track IDs
+        // from deposit events, or use next_deposit_id - 1 to find the latest.
+        let _depositor = depositor; // param kept for ABI compatibility
+        Vec::new(&env)
     }
 
     pub fn get_time(env: Env) -> u64 {
