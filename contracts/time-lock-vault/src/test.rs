@@ -1375,5 +1375,114 @@ fn test_emergency_withdraw_ledger_non_admin_fails() {
         Err(Ok(VaultError::Unauthorized))
     );
 }
-// Add to test.rs temporarily
+
+// ================================================================
+//  Issue #227: Vault query exposes ledger-based deposits
+// ================================================================
+
 #[test]
+fn test_get_all_vaults_includes_ledger_deposits() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&bob, &5_000);
+
+    // Create a time-based deposit
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    // Create a ledger-based deposit
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    vault.deposit_by_ledger(&bob, &token, &2_000, &unlock_ledger, &0);
+
+    // get_all_vaults should return both deposits
+    let vaults = vault.get_all_vaults(&0, &10);
+    assert_eq!(vaults.len(), 2);
+
+    // Verify both deposits are present
+    let alice_vault = vaults.iter().find(|v| v.depositor == alice);
+    let bob_vault = vaults.iter().find(|v| v.depositor == bob);
+
+    assert!(alice_vault.is_some());
+    assert!(bob_vault.is_some());
+
+    assert_eq!(alice_vault.unwrap().entry.amount, 1_000);
+    assert_eq!(bob_vault.unwrap().entry.amount, 2_000);
+}
+
+#[test]
+fn test_get_all_vaults_pagination_respects_limit() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let bob: Address = Address::generate(&env);
+    let carol: Address = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&bob, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&carol, &5_000);
+
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&bob, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&carol, &token, &1_000, &unlock_time, &0);
+
+    // Request only 2 results
+    let vaults = vault.get_all_vaults(&0, &2);
+    assert_eq!(vaults.len(), 2);
+
+    // Request next page
+    let vaults2 = vault.get_all_vaults(&2, &2);
+    assert_eq!(vaults2.len(), 1);
+}
+
+#[test]
+fn test_get_all_vaults_empty_state() {
+    let (_env, vault, _token, _admin, _alice, _fee) = setup();
+    let vaults = vault.get_all_vaults(&0, &10);
+    assert_eq!(vaults.len(), 0);
+}
+
+#[test]
+fn test_vault_status_returns_correct_state() {
+    let (env, vault, _token, admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    let status = vault.vault_status();
+    assert_eq!(status.has_admin, true);
+    assert_eq!(status.admin, Some(admin));
+    assert_eq!(status.paused, false);
+    assert_eq!(status.depositor_count, 1);
+}
+
+#[test]
+fn test_vault_status_after_pause() {
+    let (env, vault, _token, admin, _alice, _fee) = setup();
+    vault.pause(&admin);
+
+    let status = vault.vault_status();
+    assert_eq!(status.paused, true);
+}
+
+#[test]
+fn test_batch_withdraw_uses_has_any_deposit() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+
+    advance_time(&env, 3601);
+
+    let deposit_ids = vec![&env, 0_u32];
+    let results = vault.batch_withdraw(&alice, deposit_ids);
+
+    assert_eq!(results.len(), 1);
+    assert!(results.get(0).unwrap().success);
+    assert_eq!(vault.get_depositor_count(), 0);
+}
+
+#[test]
+fn test_ledger_deposit_included_in_deposit_ids() {
+    let (env, vault, token, _admin, alice, _fee) = setup();
+    let unlock_ledger = env.ledger().sequence() + 1000;
+    vault.deposit_by_ledger(&alice, &token, &1_000, &unlock_ledger, &0);
+
+    let ids = vault.get_deposit_ids(&alice);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids.get(0).unwrap(), 0);
+}
