@@ -79,7 +79,8 @@ stellar contract invoke \
     --source "$IDENTITY" \
     --network "$NETWORK" \
     -- initialize \
-    --admin "$ADMIN_ADDR" > /dev/null
+    --admin "$ADMIN_ADDR" \
+    --fee_recipient "$ADMIN_ADDR" > /dev/null
 pass "initialize OK"
 
 # ── 6. Wrap native XLM as a token ────────────────────────────────────────────
@@ -96,7 +97,7 @@ pass "Token: $TOKEN_ID"
 echo "==> Calling deposit..."
 # unlock_time = now + 120 seconds
 UNLOCK_TIME=$(( $(date +%s) + 120 ))
-stellar contract invoke \
+DEPOSIT_ID=$(stellar contract invoke \
     --id "$CONTRACT_ID" \
     --source "$IDENTITY" \
     --network "$NETWORK" \
@@ -104,8 +105,9 @@ stellar contract invoke \
     --depositor "$ADMIN_ADDR" \
     --token "$TOKEN_ID" \
     --amount 1000 \
-    --unlock_time "$UNLOCK_TIME" > /dev/null
-pass "deposit OK"
+    --unlock_time "$UNLOCK_TIME" \
+    --penalty_bps 500)
+pass "deposit OK (deposit_id=$DEPOSIT_ID)"
 
 # ── 8. get_vault ──────────────────────────────────────────────────────────────
 
@@ -115,7 +117,8 @@ VAULT_OUT=$(stellar contract invoke \
     --source "$IDENTITY" \
     --network "$NETWORK" \
     -- get_vault \
-    --depositor "$ADMIN_ADDR")
+    --depositor "$ADMIN_ADDR" \
+    --deposit_id "$DEPOSIT_ID")
 assert_contains "get_vault returns amount 1000" "1000" "$VAULT_OUT"
 
 # ── 9. time_remaining ────────────────────────────────────────────────────────
@@ -126,7 +129,8 @@ TIME_OUT=$(stellar contract invoke \
     --source "$IDENTITY" \
     --network "$NETWORK" \
     -- time_remaining \
-    --depositor "$ADMIN_ADDR")
+    --depositor "$ADMIN_ADDR" \
+    --deposit_id "$DEPOSIT_ID")
 # Should be > 0 since we just deposited with a 120s lock
 if [ "$TIME_OUT" -gt 0 ] 2>/dev/null; then
     pass "time_remaining > 0 ($TIME_OUT)"
@@ -142,7 +146,8 @@ WITHDRAW_ERR=$(stellar contract invoke \
     --source "$IDENTITY" \
     --network "$NETWORK" \
     -- withdraw \
-    --depositor "$ADMIN_ADDR" 2>&1 || true)
+    --depositor "$ADMIN_ADDR" \
+    --deposit_id "$DEPOSIT_ID" 2>&1 || true)
 assert_contains "withdraw fails while locked" "FundsStillLocked" "$WITHDRAW_ERR"
 
 # ── Done ──────────────────────────────────────────────────────────────────────

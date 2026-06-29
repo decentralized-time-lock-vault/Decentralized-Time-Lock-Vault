@@ -1,51 +1,72 @@
 use soroban_sdk::{contracttype, Address};
 
-// ----------------------------------------------------------------
-//  Storage Keys
-// ----------------------------------------------------------------
-
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VaultKey {
-    /// Maps (depositor, deposit_id) → VaultEntry
     Deposit(Address, u32),
-    /// Maps depositor → next deposit ID counter
+    DepositByLedger(Address, u32),
     DepositCounter(Address),
-    /// Contract-level admin address
+    ActiveDepositCount(Address),
     Admin,
     PendingAdmin,
-    /// Set to true once initialize() has been called; never removed
     Initialized,
-    /// Global list of all active depositor addresses (Vec<Address>)
-    DepositorList,
-    /// Address that receives penalty fees on early cancellation
+    DepositorMember(Address),
+    DepositorCount,
+    DepositorAt(u32),
+    DepositorIndex(Address),
     FeeRecipient,
-    /// Runtime-configurable max deposit amount (overrides compile-time constant)
     MaxDeposit,
-    /// Runtime-configurable max lock duration in seconds (overrides compile-time constant)
     MaxLockSecs,
+    Paused,
+    DepositorFrozen(Address),
+    TokenFrozen(Address),
+    MaxPenaltyBps,
+    MinCancelFee,
 }
 
-// ----------------------------------------------------------------
-//  Data Structures
-// ----------------------------------------------------------------
-
-/// Represents a single vault deposit.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VaultEntry {
     pub token: Address,
     pub amount: i128,
     pub unlock_time: u64,
-    /// Early-exit penalty in basis points (0–10000). Charged on cancel_deposit.
+    pub depositor: Address,
     pub penalty_bps: u32,
 }
 
-/// Per-depositor result returned by `batch_emergency_withdraw`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LedgerVaultEntry {
+    pub token: Address,
+    pub amount: i128,
+    pub unlock_ledger: u32,
+    pub depositor: Address,
+    pub penalty_bps: u32,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WithdrawResult {
     pub depositor: Address,
-    /// `true` if funds were successfully transferred; `false` if skipped (no deposit).
+    pub deposit_id: u32,
     pub success: bool,
+    pub amount: i128,
+    pub token: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VaultInfo {
+    pub depositor: Address,
+    pub deposit_id: u32,
+    pub entry: VaultEntry,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VaultStatus {
+    pub has_admin: bool,
+    pub admin: Option<Address>,
+    pub paused: bool,
+    pub depositor_count: u32,
 }
