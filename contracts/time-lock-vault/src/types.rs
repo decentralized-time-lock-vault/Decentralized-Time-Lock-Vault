@@ -19,6 +19,9 @@ pub enum VaultKey {
     MaxLockSecs,
     Paused,
     DepositorFrozen(Address),
+    TokenFrozen(Address),
+    MaxPenaltyBps,
+    MinCancelFee,
 }
 
 #[contracttype]
@@ -47,4 +50,23 @@ pub struct WithdrawResult {
     pub depositor: Address,
     pub deposit_id: u32,
     pub success: bool,
+    pub amount: i128,
+    pub token: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VaultInfo {
+    pub depositor: Address,
+    pub deposit_id: u32,
+    pub entry: VaultEntry,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VaultStatus {
+    pub has_admin: bool,
+    pub admin: Option<Address>,
+    pub paused: bool,
+    pub depositor_count: u32,
 }
