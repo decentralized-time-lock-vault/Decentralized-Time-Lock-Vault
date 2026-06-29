@@ -98,18 +98,14 @@ pub fn paused(env: &Env, admin: &Address) {
     );
 }
 
-pub fn unpaused(env: &Env, admin: &Address) {
-    env.events().publish(
-        (Symbol::new(env, "unpaused"), admin.clone()),
-        (),
-    );
+pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_xfr_done"),);
+    env.events().publish(topics, new_admin.clone());
 }
 
-pub fn frozen(env: &Env, admin: &Address, depositor: &Address) {
-    env.events().publish(
-        (symbol_short!("frozen"), admin.clone(), depositor.clone()),
-        (),
-    );
+pub fn admin_renounced(env: &Env, former_admin: &Address) {
+    let topics = (Symbol::new(env, "adm_renounce"),);
+    env.events().publish(topics, former_admin.clone());
 }
 
 pub fn unfrozen(env: &Env, admin: &Address, depositor: &Address) {
