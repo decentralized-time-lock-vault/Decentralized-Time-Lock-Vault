@@ -404,7 +404,7 @@ Returns `true` if the depositor is currently frozen.
 Returns `true` if `initialize` has been called.
 ---
 
-## 📋 Events
+## Events
 
 All events are emitted via `env.events().publish(topics, data)`.
 
@@ -433,7 +433,7 @@ All events are emitted via `env.events().publish(topics, data)`.
 All `amount` and `penalty` values are `i128` token units. `deposit_id` is a `u32` per-depositor sequence number. For `deposit_by_ledger`, the `unlock_time` field in the `deposit` event carries `unlock_ledger` cast to `u64`.
 ---
 
-## 🗄️ Storage Layout
+## Storage Layout
 
 All entries use **Persistent Storage** with TTL bump threshold ≈ 30 days (`BUMP_THRESHOLD = 518_400` ledgers) and target ≈ 5.2 years (`BUMP_TARGET` derived from `MAX_LOCK_DURATION_SECS / 5s`).
 
@@ -464,7 +464,7 @@ TTL is bumped on every **write**. Read-only query functions skip the TTL bump to
 
 ---
 
-## ❌ Error Codes
+## Error Codes
 
 | Code | Name | Meaning |
 |---|---|---|
@@ -474,7 +474,7 @@ TTL is bumped on every **write**. Read-only query functions skip the TTL bump to
 | 4 | `FundsStillLocked` | Lock period not yet expired |
 | 5 | `DepositAlreadyExists` | Reserved error code |
 | 6 | `LockDurationTooLong` | Lock period exceeds 5 years |
-| 7 | `Unauthorized` | Caller is not the admin |
+| 7 | `Unauthorized` | Caller is not the admin or pending admin |
 | 8 | `AmountTooLarge` | Amount exceeds 10^15 |
 | 9 | `InvalidPenaltyBps` | `penalty_bps` > 10000 |
 | 10 | `LockDurationTooShort` | Lock period is shorter than the minimum (60 s) |
@@ -487,7 +487,7 @@ TTL is bumped on every **write**. Read-only query functions skip the TTL bump to
 
 ---
 
-## 🔐 Security Properties
+## Security Properties
 
 | Property | Implementation |
 |---|---|
@@ -506,7 +506,7 @@ TTL is bumped on every **write**. Read-only query functions skip the TTL bump to
 
 ---
 
-## 🔄 Upgradeability
+## Upgradeability
 
 Soroban contracts are **immutable by default** — once deployed, the contract code cannot be changed or patched.
 
@@ -520,9 +520,9 @@ Soroban contracts are **immutable by default** — once deployed, the contract c
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### 📋 Prerequisites
+### Prerequisites
 
 ```bash
 # Install Rust
@@ -538,7 +538,7 @@ cargo install --locked soroban-cli
 cargo install cargo-watch
 ```
 
-### 🔨 Build
+### Build
 
 ```bash
 make build
@@ -547,7 +547,7 @@ make build
 > **Why not just `cargo build`?**
 > Running `cargo build` without `--target wasm32-unknown-unknown` produces a native binary, not a WASM contract. The Makefile's `build` target always passes the correct flag.
 
-### ✅ Test
+### Test
 
 ```bash
 make test
@@ -583,7 +583,7 @@ pipeline: `fmt-check → lint → test → audit → deny`).
 `.github/workflows/release.yml`, which builds an optimized WASM binary and attaches it to the
 GitHub Release as `time_lock_vault.optimized.wasm`.
 
-### 📦 License & dependency policy
+### License & dependency policy
 
 ```bash
 make deny
@@ -595,7 +595,7 @@ make deny
 make optimize
 ```
 
-### 📊 Check WASM size
+### Check WASM size
 
 ```bash
 make check-wasm-size
@@ -603,7 +603,7 @@ make check-wasm-size
 
 Fails if the optimized WASM exceeds `MAX_WASM_BYTES` (default **65 536 bytes / 64 KB**).
 
-### 🌐 Deploy to Testnet
+### Deploy to Testnet
 
 ```bash
 export SOROBAN_SECRET_KEY=S...
@@ -697,7 +697,7 @@ To add assertions for additional contract functions, edit `scripts/smoke_test_lo
 
 ---
 
-## 🧬 Testing
+## Testing
 
 ### Run all tests
 
@@ -713,7 +713,7 @@ cargo test test_deposit_success --features testutils -- --nocapture
 
 ### Test categories
 
-The suite (`contracts/time-lock-vault/src/test.rs`) contains 48+ tests covering:
+The suite (`contracts/time-lock-vault/src/test.rs`) contains 70+ tests covering:
 
 | Category | What is tested |
 |---|---|
