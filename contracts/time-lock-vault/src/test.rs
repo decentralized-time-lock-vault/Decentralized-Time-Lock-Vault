@@ -3,13 +3,15 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, IntoVal, Symbol, Vec,
+    Address, Env, Vec,
 };
 
 use crate::{
-    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_PAGE_LIMIT},
+    constants::{
+        MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MAX_PAGE_LIMIT, MIN_LOCK_DURATION_SECS,
+    },
     contract::{TimeLockVault, TimeLockVaultClient},
     errors::VaultError,
     types::VaultEntry,
@@ -48,9 +50,11 @@ fn setup() -> (
 }
 
 fn advance_time(env: &Env, seconds: u64) {
+    #[allow(deprecated)]
+    let protocol_version = env.ledger().protocol_version();
     env.ledger().set(LedgerInfo {
         timestamp: env.ledger().timestamp() + seconds,
-        protocol_version: env.ledger().protocol_version(),
+        protocol_version,
         sequence_number: env.ledger().sequence(),
         network_id: Default::default(),
         base_reserve: 10,
@@ -61,9 +65,11 @@ fn advance_time(env: &Env, seconds: u64) {
 }
 
 fn advance_ledger(env: &Env, ledgers: u32) {
+    #[allow(deprecated)]
+    let protocol_version = env.ledger().protocol_version();
     env.ledger().set(LedgerInfo {
         timestamp: env.ledger().timestamp(),
-        protocol_version: env.ledger().protocol_version(),
+        protocol_version,
         sequence_number: env.ledger().sequence() + ledgers,
         network_id: Default::default(),
         base_reserve: 10,
@@ -711,7 +717,7 @@ fn test_get_depositors_pagination() {
 
 #[test]
 fn test_pause_by_admin_succeeds() {
-    let (env, vault, _token, admin, _alice, _fee) = setup();
+    let (_env, vault, _token, admin, _alice, _fee) = setup();
     assert!(!vault.is_paused());
     vault.pause(&admin);
     assert!(vault.is_paused());
@@ -719,7 +725,7 @@ fn test_pause_by_admin_succeeds() {
 
 #[test]
 fn test_pause_by_non_admin_fails() {
-    let (env, vault, _token, _admin, alice, _fee) = setup();
+    let (_env, vault, _token, _admin, alice, _fee) = setup();
     assert_eq!(vault.try_pause(&alice), Err(Ok(VaultError::Unauthorized)));
 }
 
@@ -920,7 +926,7 @@ fn test_withdraw_to_removes_depositor() {
 
 #[test]
 fn test_freeze_depositor_by_admin_succeeds() {
-    let (env, vault, _token, admin, alice, _fee) = setup();
+    let (_env, vault, _token, admin, alice, _fee) = setup();
     assert!(!vault.is_depositor_frozen(&alice));
     vault.freeze_depositor(&admin, &alice);
     assert!(vault.is_depositor_frozen(&alice));
@@ -928,7 +934,7 @@ fn test_freeze_depositor_by_admin_succeeds() {
 
 #[test]
 fn test_unfreeze_depositor_by_admin_succeeds() {
-    let (env, vault, _token, admin, alice, _fee) = setup();
+    let (_env, vault, _token, admin, alice, _fee) = setup();
     vault.freeze_depositor(&admin, &alice);
     assert!(vault.is_depositor_frozen(&alice));
     vault.unfreeze_depositor(&admin, &alice);
@@ -1451,6 +1457,41 @@ fn test_get_all_vaults_pagination_respects_limit() {
     assert_eq!(vaults2.len(), 1);
 }
 
+/// Regression test: `offset` is a flat start index in the full depositor list,
+/// so `get_all_vaults(4, 2)` must skip the first two pages (4 depositors) and
+/// return the third page. Guards against swapped-division in pagination math.
+#[test]
+fn test_get_all_vaults_deep_pagination_offset() {
+    let (env, vault, token, _admin, _alice, _fee) = setup();
+    let alice = Address::generate(&env);
+    let bob: Address = Address::generate(&env);
+    let carol: Address = Address::generate(&env);
+    let dave: Address = Address::generate(&env);
+    let erin: Address = Address::generate(&env);
+    StellarAssetClient::new(&env, &token).mint(&alice, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&bob, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&carol, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&dave, &5_000);
+    StellarAssetClient::new(&env, &token).mint(&erin, &5_000);
+
+    let unlock_time = env.ledger().timestamp() + 3600;
+    vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&bob, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&carol, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&dave, &token, &1_000, &unlock_time, &0);
+    vault.deposit(&erin, &token, &1_000, &unlock_time, &0);
+
+    // Page 0: depositors 0..2 (alice, bob)
+    let page0 = vault.get_all_vaults(&0, &2);
+    assert_eq!(page0.len(), 2);
+    assert_eq!(page0.get(0).unwrap().depositor, alice);
+
+    // Page 2 (offset=4): depositors 4..5 (erin) — must NOT wrap to page 0.
+    let page2 = vault.get_all_vaults(&4, &2);
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2.get(0).unwrap().depositor, erin);
+}
+
 #[test]
 fn test_get_all_vaults_empty_state() {
     let (_env, vault, _token, _admin, _alice, _fee) = setup();
@@ -1465,19 +1506,19 @@ fn test_vault_status_returns_correct_state() {
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
 
     let status = vault.vault_status();
-    assert_eq!(status.has_admin, true);
+    assert!(status.has_admin);
     assert_eq!(status.admin, Some(admin));
-    assert_eq!(status.paused, false);
+    assert!(!status.paused);
     assert_eq!(status.depositor_count, 1);
 }
 
 #[test]
 fn test_vault_status_after_pause() {
-    let (env, vault, _token, admin, _alice, _fee) = setup();
+    let (_env, vault, _token, admin, _alice, _fee) = setup();
     vault.pause(&admin);
 
     let status = vault.vault_status();
-    assert_eq!(status.paused, true);
+    assert!(status.paused);
 }
 
 #[test]
@@ -1513,12 +1554,7 @@ fn test_ledger_deposit_included_in_deposit_ids() {
 // ================================================================
 
 /// Helper: mint tokens and deposit for a fresh address.
-fn deposit_for(
-    env: &Env,
-    vault: &TimeLockVaultClient,
-    token: &Address,
-    amount: i128,
-) -> Address {
+fn deposit_for(env: &Env, vault: &TimeLockVaultClient, token: &Address, amount: i128) -> Address {
     let depositor = Address::generate(env);
     let asset_client = StellarAssetClient::new(env, token);
     asset_client.mint(&depositor, &amount);
@@ -1565,8 +1601,8 @@ fn test_get_depositors_page_out_of_bounds_returns_empty() {
 fn test_get_depositors_page_limit_capped_at_max() {
     let (env, vault, token, _admin, _alice, _fee) = setup();
 
-    // Deposit MAX_PAGE_LIMIT + 5 entries
-    let total = MAX_PAGE_LIMIT + 5;
+    // Deposit MAX_PAGE_LIMIT + 1 entries (keep test intent but reduce ledger footprint)
+    let total = MAX_PAGE_LIMIT + 1;
     for _ in 0..total {
         deposit_for(&env, &vault, &token, 100);
     }
@@ -1724,9 +1760,9 @@ fn test_get_deposit_ids_returns_only_active_not_historical() {
     // Active IDs must be [1, 2] — not the full range [0, 1, 2].
     let ids = vault.get_deposit_ids(&alice);
     assert_eq!(ids.len(), 2);
-    assert!(!ids.contains(&0));
-    assert!(ids.contains(&1));
-    assert!(ids.contains(&2));
+    assert!(!ids.contains(0));
+    assert!(ids.contains(1));
+    assert!(ids.contains(2));
 }
 
 // #262 — active-deposit counter stays correct across multiple deposit/withdraw cycles.

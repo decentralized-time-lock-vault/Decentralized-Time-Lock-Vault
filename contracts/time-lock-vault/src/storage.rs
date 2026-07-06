@@ -15,11 +15,35 @@
 //! | `MaxDeposit` | `i128` | `initialize` (optional) | never | Absent → use compile-time `MAX_DEPOSIT_AMOUNT` |
 //! | `MaxLockSecs` | `u64` | `initialize` (optional) | never | Absent → use compile-time `MAX_LOCK_DURATION_SECS` |
 //! | `Paused` | `bool` | `pause`, `unpause` | never | Absent → treated as `false` (not paused) |
-//! | `DepositorList` | `Vec<Address>` | `deposit`, `deposit_by_ledger` | entry removed when depositor's last deposit is withdrawn | Linear scan on read/write — see scalability note below |
+//! | `DepositorMember(depositor)` | `bool` | `add_depositor` | `remove_depositor` | Membership flag; O(1) duplicate guard |
+//! | `DepositorCount` | `u32` | `add_depositor`, `remove_depositor` | never decremented below 0 | Total distinct depositors with ≥1 active deposit |
+//! | `DepositorAt(slot)` | `Address` | `add_depositor`, `remove_depositor` (swap-remove) | overwritten on swap-remove | Slot array backing the depositor list |
+//! | `DepositorIndex(depositor)` | `u32` | `add_depositor`, `remove_depositor` | `remove_depositor` | Reverse map: depositor → slot |
 //! | `DepositCounter(depositor)` | `u32` | every `deposit` / `deposit_by_ledger` call | never decremented | Monotonically increasing per-depositor sequence |
 //! | `Deposit(depositor, id)` | `VaultEntry` | `deposit`, `deposit_for` | `withdraw`, `cancel_deposit`, `emergency_withdraw` | Timestamp-based lock; `id` comes from `DepositCounter` |
 //! | `DepositByLedger(depositor, id)` | `LedgerVaultEntry` | `deposit_by_ledger` | `withdraw`, `emergency_withdraw` | Ledger-sequence-based lock; same `id` counter as above |
+//! | `ActiveDepositCount(depositor)` | `u32` | every deposit/withdraw path | decremented on removal | Tracks active deposits for O(1) `has_any_deposit` |
 //!
+//! ## TTL Policy
+//!
+//! - `BUMP_THRESHOLD` (`518_400` ledgers ≈ 30 days): TTL extension is triggered
+//!   only when the remaining TTL falls below this value, avoiding redundant
+//!   ledger writes on every call.
+//! - `BUMP_TARGET` (≈ 5.2 years in ledgers): Derived from `MAX_LOCK_DURATION_SECS`
+//!   divided by `LEDGER_SECONDS` (5 s/ledger). Guarantees that a max-duration
+//!   deposit cannot expire before its unlock time without a manual TTL extension.
+//!
+//! ## Scalability Notes
+//!
+//! - **`get_all_deposit_ids`** performs a linear scan over `[0, DepositCounter)`,
+//!   checking whether each `VaultKey::Deposit` / `VaultKey::DepositByLedger` key
+//!   exists. Cost grows with the number of deposits a single address has ever
+//!   made (not just active ones). Keep per-depositor deposit counts small for
+//!   predictable instruction costs.
+//! - **Depositor list** is stored as a slot array (`DepositorAt` + `DepositorIndex`)
+//!   with a `DepositorMember` flag for O(1) duplicate detection. `add_depositor`
+//!   appends; `remove_depositor` uses swap-remove. No full-list scan occurs.
+//!   Use `get_depositors_page` for paginated off-chain reads.
 //! ## TTL Policy
 //!
 //! - `BUMP_THRESHOLD` (`518_400` ledgers ≈ 30 days): TTL extension is triggered
@@ -52,7 +76,7 @@ pub const BUMP_THRESHOLD: u32 = 518_400;
 /// Target TTL (in ledgers) applied by every `extend_ttl` call.
 /// Derived from `MAX_LOCK_DURATION_SECS` so a max-duration deposit can never
 /// expire before its unlock time. Approximately 5.2 years at 5 s/ledger.
-pub const BUMP_TARGET: u32 = ((MAX_LOCK_DURATION_SECS + LEDGER_SECONDS - 1) / LEDGER_SECONDS) as u32;
+pub const BUMP_TARGET: u32 = MAX_LOCK_DURATION_SECS.div_ceil(LEDGER_SECONDS) as u32;
 
 // ----------------------------------------------------------------
 //  TTL helper
@@ -81,42 +105,20 @@ pub fn next_deposit_id(env: &Env, depositor: &Address) -> u32 {
     id
 }
 
-/// Returns all active timestamp-based deposit IDs for `depositor`.
-///
-/// Performs a linear scan over `[0, DepositCounter)`, checking `has` for each
-/// `VaultKey::Deposit`. Instruction cost is proportional to the total number of
-/// deposits ever made by this address, not just active ones. This function does
-/// **not** include ledger-based deposit IDs (`VaultKey::DepositByLedger`).
-///
-/// **TTL:** not bumped (read-only path).
-pub fn get_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
-    // Scan from 0..DepositCounter and collect timestamp-based deposit IDs that exist.
+/// Returns the first active deposit id for `depositor` if any (timestamp or ledger based).
+/// Read-only helper used to quickly check for the presence of any active deposit.
+pub fn get_active_deposit_id(env: &Env, depositor: &Address) -> Option<u32> {
     let counter_key = VaultKey::DepositCounter(depositor.clone());
     let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-    let mut ids = Vec::new(env);
     for id in 0..count {
-        let key = VaultKey::Deposit(depositor.clone(), id);
-        if env.storage().persistent().has(&key) {
-            ids.push_back(id);
+        let key_ts = VaultKey::Deposit(depositor.clone(), id);
+        let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
+        if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
+            return Some(id);
         }
     }
-    ids
+    None
 }
-
-    /// Returns the first active deposit id for `depositor` if any (timestamp or ledger based).
-    /// Read-only helper used to quickly check for the presence of any active deposit.
-    pub fn get_active_deposit_id(env: &Env, depositor: &Address) -> Option<u32> {
-        let counter_key = VaultKey::DepositCounter(depositor.clone());
-        let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-        for id in 0..count {
-            let key_ts = VaultKey::Deposit(depositor.clone(), id);
-            let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
-            if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
-                return Some(id);
-            }
-        }
-        None
-    }
 
 fn inc_active_count(env: &Env, depositor: &Address) {
     let key = VaultKey::ActiveDepositCount(depositor.clone());
@@ -145,38 +147,6 @@ pub fn has_any_deposit(env: &Env, depositor: &Address) -> bool {
     count > 0
 }
 
-pub fn get_deposit_by_ledger_ids(env: &Env, depositor: &Address) -> Vec<u32> {
-    let counter_key = VaultKey::DepositCounter(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-    let mut ids = Vec::new(env);
-    for id in 0..count {
-        let key = VaultKey::DepositByLedger(depositor.clone(), id);
-        if env.storage().persistent().has(&key) {
-            ids.push_back(id);
-        }
-    }
-    ids
-}
-
-/// Returns ledger-based deposit IDs with a limit to avoid unbounded scans.
-/// This is a bounded alternative to get_deposit_by_ledger_ids for query operations.
-pub fn get_deposit_by_ledger_ids_limited(env: &Env, depositor: &Address, max_results: u32) -> Vec<u32> {
-    let counter_key = VaultKey::DepositCounter(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-    let mut ids = Vec::new(env);
-    let limit = count.min(max_results);
-    for id in 0..limit {
-        let key = VaultKey::DepositByLedger(depositor.clone(), id);
-        if env.storage().persistent().has(&key) {
-            ids.push_back(id);
-            if ids.len() >= max_results {
-                break;
-            }
-        }
-    }
-    ids
-}
-
 pub fn get_all_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
     let counter_key = VaultKey::DepositCounter(depositor.clone());
     let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
@@ -186,26 +156,6 @@ pub fn get_all_deposit_ids(env: &Env, depositor: &Address) -> Vec<u32> {
         let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
         if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
             ids.push_back(id);
-        }
-    }
-    ids
-}
-
-/// Returns all deposit IDs with a limit to avoid unbounded scans.
-/// This is a bounded alternative to get_all_deposit_ids for query operations.
-pub fn get_all_deposit_ids_limited(env: &Env, depositor: &Address, max_results: u32) -> Vec<u32> {
-    let counter_key = VaultKey::DepositCounter(depositor.clone());
-    let count: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-    let mut ids = Vec::new(env);
-    let limit = count.min(max_results);
-    for id in 0..limit {
-        let key_ts = VaultKey::Deposit(depositor.clone(), id);
-        let key_ledger = VaultKey::DepositByLedger(depositor.clone(), id);
-        if env.storage().persistent().has(&key_ts) || env.storage().persistent().has(&key_ledger) {
-            ids.push_back(id);
-            if ids.len() >= max_results {
-                break;
-            }
         }
     }
     ids
@@ -263,7 +213,12 @@ pub fn remove_deposit(env: &Env, depositor: &Address, deposit_id: u32) {
 
 /// Persists a ledger-sequence-based `LedgerVaultEntry` and bumps TTL.
 /// Key: `VaultKey::DepositByLedger(depositor, deposit_id)`.
-pub fn set_deposit_by_ledger(env: &Env, depositor: &Address, deposit_id: u32, entry: &LedgerVaultEntry) {
+pub fn set_deposit_by_ledger(
+    env: &Env,
+    depositor: &Address,
+    deposit_id: u32,
+    entry: &LedgerVaultEntry,
+) {
     let key = VaultKey::DepositByLedger(depositor.clone(), deposit_id);
     env.storage().persistent().set(&key, entry);
     extend_ttl(env, &key);
@@ -272,7 +227,11 @@ pub fn set_deposit_by_ledger(env: &Env, depositor: &Address, deposit_id: u32, en
 
 /// Retrieves a ledger-based deposit **without** bumping TTL.
 /// Used by `withdraw` and `emergency_withdraw` immediately before removal.
-pub fn get_deposit_by_ledger_readonly(env: &Env, depositor: &Address, deposit_id: u32) -> Option<LedgerVaultEntry> {
+pub fn get_deposit_by_ledger_readonly(
+    env: &Env,
+    depositor: &Address,
+    deposit_id: u32,
+) -> Option<LedgerVaultEntry> {
     env.storage()
         .persistent()
         .get(&VaultKey::DepositByLedger(depositor.clone(), deposit_id))
@@ -330,7 +289,10 @@ pub fn remove_pending_admin(env: &Env) {
 /// Require that the provided `admin` matches the stored admin.
 /// Returns `Err(VaultError::Unauthorized)` when no admin is set or they differ.
 pub fn require_admin(env: &Env, admin: &Address) -> Result<(), crate::errors::VaultError> {
-    let stored = env.storage().persistent().get::<VaultKey, Address>(&VaultKey::Admin);
+    let stored = env
+        .storage()
+        .persistent()
+        .get::<VaultKey, Address>(&VaultKey::Admin);
     match stored {
         Some(s) if s == *admin => Ok(()),
         _ => Err(crate::errors::VaultError::Unauthorized),
@@ -540,9 +502,7 @@ pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
 /// Sets the contract pause state. Key: `VaultKey::Paused`.
 /// When `true`, `deposit` and `deposit_for` reject new deposits with `ContractPaused`.
 pub fn set_paused(env: &Env, paused: bool) {
-    env.storage()
-        .persistent()
-        .set(&VaultKey::Paused, &paused);
+    env.storage().persistent().set(&VaultKey::Paused, &paused);
     env.storage()
         .persistent()
         .extend_ttl(&VaultKey::Paused, BUMP_THRESHOLD, BUMP_TARGET);
@@ -631,4 +591,3 @@ pub fn set_min_cancel_fee(env: &Env, fee: i128) {
 pub fn get_min_cancel_fee(env: &Env) -> Option<i128> {
     env.storage().persistent().get(&VaultKey::MinCancelFee)
 }
-
