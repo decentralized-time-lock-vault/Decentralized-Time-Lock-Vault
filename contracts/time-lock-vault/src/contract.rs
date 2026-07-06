@@ -1,14 +1,15 @@
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 use crate::{
-    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
+    constants::{MAX_BATCH_SIZE, MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_PAGE_LIMIT},
     errors::VaultError,
     events,
     storage,
     types::{LedgerVaultEntry, VaultEntry, VaultInfo, WithdrawResult, VaultStatus},
 };
 
-pub const MAX_DEPOSITORS_PAGE_SIZE: u32 = 100;
+// Use the deployment-specific page cap from `constants.rs`.
+pub const MAX_DEPOSITORS_PAGE_SIZE: u32 = MAX_PAGE_LIMIT;
 
 #[contract]
 pub struct TimeLockVault;
@@ -720,11 +721,12 @@ impl TimeLockVault {
     }
 
     pub fn get_depositors(env: Env, offset: u32, limit: u32) -> Vec<Address> {
-        storage::get_depositors_page(&env, offset, limit.min(MAX_DEPOSITORS_PAGE_SIZE))
+        let page_index = if limit == 0 { 0 } else { offset / limit };
+        storage::get_depositors_page(&env, page_index, limit.min(MAX_DEPOSITORS_PAGE_SIZE))
     }
 
     pub fn get_depositors_page(env: Env, offset: u32, limit: u32) -> Vec<Address> {
-        storage::get_depositors_page(&env, offset, limit)
+        storage::get_depositors_page(&env, offset, limit.min(MAX_DEPOSITORS_PAGE_SIZE))
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -825,11 +827,15 @@ impl TimeLockVault {
     // Read-only Queries
     // ----------------------------------------------------------------
     pub fn get_all_vaults(env: Env, offset: u32, limit: u32) -> Vec<VaultInfo> {
-        let depositors = storage::get_depositors_page(&env, offset, limit);
+        // `offset` is a start index for vaults across all depositors; convert
+        // it to a depositor page index expected by `get_depositors_page`.
+        let depositor_page = if limit == 0 { 0 } else { offset / limit };
+        let depositors = storage::get_depositors_page(&env, depositor_page, limit.min(MAX_DEPOSITORS_PAGE_SIZE));
         let mut vaults: Vec<VaultInfo> = Vec::new(&env);
         for i in 0..depositors.len() {
             let depositor = depositors.get(i).unwrap();
-            let ids = storage::get_deposit_ids(&env, &depositor);
+            // Include both timestamp and ledger-based deposit ids
+            let ids = storage::get_all_deposit_ids(&env, &depositor);
             for j in 0..ids.len() {
                 let deposit_id = ids.get(j).unwrap();
                 if let Some(entry) = storage::get_deposit_readonly(&env, &depositor, deposit_id) {

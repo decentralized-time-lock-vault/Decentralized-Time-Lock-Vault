@@ -518,8 +518,16 @@ pub fn get_depositor_count(env: &Env) -> u32 {
 pub fn get_depositors_page(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
     let count = get_depositor_count_raw(env);
     let mut page: Vec<Address> = Vec::new(env);
-    let end = (offset.saturating_add(limit)).min(count);
-    for i in offset..end {
+    if limit == 0 {
+        return page;
+    }
+    // Interpret `offset` as a page index: start = offset * limit
+    let start = offset.saturating_mul(limit);
+    if start >= count {
+        return page;
+    }
+    let end = (start.saturating_add(limit)).min(count);
+    for i in start..end {
         page.push_back(get_depositor_at(env, i));
     }
     page
