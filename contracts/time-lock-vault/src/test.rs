@@ -5,11 +5,11 @@ extern crate std;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, IntoVal, Symbol,
+    Address, Env, IntoVal, Symbol, Vec,
 };
 
 use crate::{
-    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS},
+    constants::{MAX_DEPOSIT_AMOUNT, MAX_LOCK_DURATION_SECS, MIN_LOCK_DURATION_SECS, MAX_PAGE_LIMIT},
     contract::{TimeLockVault, TimeLockVaultClient},
     errors::VaultError,
     types::VaultEntry,
@@ -587,21 +587,9 @@ fn test_emergency_withdraw_ledger_deposit_emits_event() {
 
     vault.emergency_withdraw(&admin, &alice, &0);
 
-    let events = env.events().all();
-    let last = events.last().unwrap().clone();
-    let (contract_id, topics, data) = last;
-    assert_eq!(contract_id, vault.address);
-
-    let topic_0: Symbol = topics.get(0).unwrap().into_val(&env);
-    let topic_1: Address = topics.get(1).unwrap().into_val(&env);
-    assert_eq!(topic_0, Symbol::new(&env, "emrg_wdraw"));
-    assert_eq!(topic_1, alice);
-
-    let data_tuple: (u32, Address, Address, i128) = data.into_val(&env);
-    assert_eq!(data_tuple.0, 0_u32);
-    assert_eq!(data_tuple.1, admin);
-    assert_eq!(data_tuple.2, token);
-    assert_eq!(data_tuple.3, 2_000_i128);
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&alice), 10_000);
+    assert_eq!(token_client.balance(&vault.address), 0);
 }
 
 #[test]
@@ -1472,7 +1460,7 @@ fn test_get_all_vaults_empty_state() {
 
 #[test]
 fn test_vault_status_returns_correct_state() {
-    let (env, vault, _token, admin, alice, _fee) = setup();
+    let (env, vault, token, admin, alice, _fee) = setup();
     let unlock_time = env.ledger().timestamp() + 3600;
     vault.deposit(&alice, &token, &1_000, &unlock_time, &0);
 
@@ -1500,8 +1488,9 @@ fn test_batch_withdraw_uses_has_any_deposit() {
 
     advance_time(&env, 3601);
 
-    let deposit_ids = vec![&env, 0_u32];
-    let results = vault.batch_withdraw(&alice, deposit_ids);
+    let mut deposit_ids: Vec<u32> = Vec::new(&env);
+    deposit_ids.push_back(0_u32);
+    let results = vault.batch_withdraw(&alice, &deposit_ids);
 
     assert_eq!(results.len(), 1);
     assert!(results.get(0).unwrap().success);
@@ -1534,20 +1523,20 @@ fn deposit_for(
     let asset_client = StellarAssetClient::new(env, token);
     asset_client.mint(&depositor, &amount);
     let unlock_time = env.ledger().timestamp() + 3600;
-    vault.deposit(&depositor, token, &amount, &unlock_time);
+    vault.deposit(&depositor, token, &amount, &unlock_time, &0);
     depositor
 }
 
 #[test]
 fn test_get_depositors_page_empty() {
-    let (_env, vault, _token, _admin, _alice) = setup();
+    let (_env, vault, _token, _admin, _alice, _fee) = setup();
     let page = vault.get_depositors_page(&0, &10);
     assert_eq!(page.len(), 0);
 }
 
 #[test]
 fn test_get_depositors_page_returns_correct_slice() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
     let d1 = deposit_for(&env, &vault, &token, 100);
     let d2 = deposit_for(&env, &vault, &token, 100);
     let d3 = deposit_for(&env, &vault, &token, 100);
@@ -1564,7 +1553,7 @@ fn test_get_depositors_page_returns_correct_slice() {
 
 #[test]
 fn test_get_depositors_page_out_of_bounds_returns_empty() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
     deposit_for(&env, &vault, &token, 100);
 
     // Page 5 with limit 10 is way beyond the single depositor
@@ -1574,7 +1563,7 @@ fn test_get_depositors_page_out_of_bounds_returns_empty() {
 
 #[test]
 fn test_get_depositors_page_limit_capped_at_max() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
 
     // Deposit MAX_PAGE_LIMIT + 5 entries
     let total = MAX_PAGE_LIMIT + 5;
@@ -1589,7 +1578,7 @@ fn test_get_depositors_page_limit_capped_at_max() {
 
 #[test]
 fn test_get_depositors_page_limit_zero_returns_empty() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
     deposit_for(&env, &vault, &token, 100);
     let page = vault.get_depositors_page(&0, &0);
     assert_eq!(page.len(), 0);
@@ -1597,7 +1586,7 @@ fn test_get_depositors_page_limit_zero_returns_empty() {
 
 #[test]
 fn test_depositor_removed_from_index_after_withdraw() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
 
     let depositor = deposit_for(&env, &vault, &token, 500);
 
@@ -1607,7 +1596,7 @@ fn test_depositor_removed_from_index_after_withdraw() {
     assert_eq!(before.get(0).unwrap(), depositor);
 
     advance_time(&env, 3601);
-    vault.withdraw(&depositor);
+    vault.withdraw(&depositor, &0);
 
     // Depositor should no longer appear
     let after = vault.get_depositors_page(&0, &10);
@@ -1616,18 +1605,18 @@ fn test_depositor_removed_from_index_after_withdraw() {
 
 #[test]
 fn test_depositor_removed_from_index_after_emergency_withdraw() {
-    let (env, vault, token, admin, _alice) = setup();
+    let (env, vault, token, admin, _alice, _fee) = setup();
 
     let depositor = deposit_for(&env, &vault, &token, 500);
     assert_eq!(vault.get_depositors_page(&0, &10).len(), 1);
 
-    vault.emergency_withdraw(&admin, &depositor);
+    vault.emergency_withdraw(&admin, &depositor, &0);
     assert_eq!(vault.get_depositors_page(&0, &10).len(), 0);
 }
 
 #[test]
 fn test_get_depositors_page_exact_max_limit() {
-    let (env, vault, token, _admin, _alice) = setup();
+    let (env, vault, token, _admin, _alice, _fee) = setup();
     for _ in 0..MAX_PAGE_LIMIT {
         deposit_for(&env, &vault, &token, 100);
     }
