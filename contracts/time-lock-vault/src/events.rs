@@ -41,8 +41,148 @@
 //! | [`admin_transfer_cancelled`] | `("adm_xfr_cancel", current_admin)` | `pending_admin` |
 //! | [`admin_transfer_accepted`] | `("adm_xfr_done", new_admin)` | `()` |
 //! | [`admin_renounced`] | `("adm_renounce", former_admin)` | `()` |
+//! | [`depositor_frozen`] | `("dep_frozen", depositor)` | `()` |
+//! | [`depositor_unfrozen`] | `("dep_unfrozen", depositor)` | `()` |
 
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contractevent, Address, Env};
+
+#[contractevent]
+pub struct Deposit {
+    #[topic]
+    depositor: Address,
+    #[topic]
+    token: Address,
+    deposit_id: u32,
+    amount: i128,
+    unlock_time: u64,
+}
+
+#[contractevent]
+pub struct TopUp {
+    #[topic]
+    depositor: Address,
+    #[topic]
+    token: Address,
+    deposit_id: u32,
+    added: i128,
+    new_total: i128,
+}
+
+#[contractevent]
+pub struct Withdraw {
+    #[topic]
+    depositor: Address,
+    #[topic]
+    token: Address,
+    deposit_id: u32,
+    amount: i128,
+}
+
+#[contractevent]
+pub struct WithdrawTo {
+    #[topic]
+    depositor: Address,
+    #[topic]
+    recipient: Address,
+    #[topic]
+    token: Address,
+    deposit_id: u32,
+    amount: i128,
+}
+
+#[contractevent(topics = ["emrg_wdraw"])]
+pub struct EmergencyWithdraw {
+    #[topic]
+    depositor: Address,
+    deposit_id: u32,
+    admin: Address,
+    token: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["dep_cancel"])]
+pub struct DepositCancelled {
+    #[topic]
+    depositor: Address,
+    #[topic]
+    token: Address,
+    amount: i128,
+    penalty: i128,
+}
+
+#[contractevent(topics = ["paused"])]
+pub struct Paused {
+    #[topic]
+    admin: Address,
+}
+
+#[contractevent(topics = ["unpaused"])]
+pub struct Unpaused {
+    #[topic]
+    admin: Address,
+}
+
+#[contractevent(topics = ["adm_xfr_init"])]
+pub struct AdminTransferInitiated {
+    #[topic]
+    current_admin: Address,
+    pending_admin: Address,
+}
+
+#[contractevent(topics = ["adm_xfr_cancel"])]
+pub struct AdminTransferCancelled {
+    #[topic]
+    current_admin: Address,
+    pending_admin: Address,
+}
+
+#[contractevent(topics = ["adm_xfr_done"])]
+pub struct AdminTransferAccepted {
+    #[topic]
+    new_admin: Address,
+}
+
+#[contractevent(topics = ["adm_renounce"])]
+pub struct AdminRenounced {
+    #[topic]
+    former_admin: Address,
+}
+
+#[contractevent]
+pub struct Migrated {
+    #[topic]
+    depositor: Address,
+    deposit_id: u32,
+    to_ledger: bool,
+    to_time: bool,
+}
+
+#[contractevent]
+pub struct LockExtended {
+    #[topic]
+    depositor: Address,
+    old_unlock_time: u64,
+    new_unlock_time: u64,
+}
+
+#[contractevent(topics = ["dep_frozen"])]
+pub struct DepositorFrozen {
+    #[topic]
+    depositor: Address,
+}
+
+#[contractevent(topics = ["dep_unfrozen"])]
+pub struct DepositorUnfrozen {
+    #[topic]
+    depositor: Address,
+}
+
+#[contractevent(topics = ["batch_wdraw"])]
+pub struct BatchWithdraw {
+    #[topic]
+    depositor: Address,
+    count: u32,
+}
 
 pub fn deposit(
     env: &Env,
@@ -52,10 +192,14 @@ pub fn deposit(
     amount: i128,
     unlock_time: u64,
 ) {
-    env.events().publish(
-        (symbol_short!("deposit"), depositor.clone(), token.clone()),
-        (deposit_id, amount, unlock_time),
-    );
+    Deposit {
+        depositor: depositor.clone(),
+        token: token.clone(),
+        deposit_id,
+        amount,
+        unlock_time,
+    }
+    .publish(env);
 }
 
 pub fn top_up(
@@ -66,23 +210,24 @@ pub fn top_up(
     added: i128,
     new_total: i128,
 ) {
-    env.events().publish(
-        (symbol_short!("top_up"), depositor.clone(), token.clone()),
-        (deposit_id, added, new_total),
-    );
+    TopUp {
+        depositor: depositor.clone(),
+        token: token.clone(),
+        deposit_id,
+        added,
+        new_total,
+    }
+    .publish(env);
 }
 
-pub fn withdraw(
-    env: &Env,
-    depositor: &Address,
-    token: &Address,
-    deposit_id: u32,
-    amount: i128,
-) {
-    env.events().publish(
-        (symbol_short!("withdraw"), depositor.clone(), token.clone()),
-        (deposit_id, amount),
-    );
+pub fn withdraw(env: &Env, depositor: &Address, token: &Address, deposit_id: u32, amount: i128) {
+    Withdraw {
+        depositor: depositor.clone(),
+        token: token.clone(),
+        deposit_id,
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn withdraw_to(
@@ -93,15 +238,14 @@ pub fn withdraw_to(
     deposit_id: u32,
     amount: i128,
 ) {
-    env.events().publish(
-        (
-            Symbol::new(env, "withdraw_to"),
-            depositor.clone(),
-            recipient.clone(),
-            token.clone(),
-        ),
-        (deposit_id, amount),
-    );
+    WithdrawTo {
+        depositor: depositor.clone(),
+        recipient: recipient.clone(),
+        token: token.clone(),
+        deposit_id,
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emergency_withdraw(
@@ -112,10 +256,14 @@ pub fn emergency_withdraw(
     token: &Address,
     amount: i128,
 ) {
-    env.events().publish(
-        (Symbol::new(env, "emrg_wdraw"), depositor.clone()),
-        (deposit_id, admin.clone(), token.clone(), amount),
-    );
+    EmergencyWithdraw {
+        depositor: depositor.clone(),
+        deposit_id,
+        admin: admin.clone(),
+        token: token.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn deposit_cancelled(
@@ -125,64 +273,96 @@ pub fn deposit_cancelled(
     amount: i128,
     penalty: i128,
 ) {
-    env.events().publish(
-        (Symbol::new(env, "dep_cancel"), depositor.clone(), token.clone()),
-        (amount, penalty),
-    );
+    DepositCancelled {
+        depositor: depositor.clone(),
+        token: token.clone(),
+        amount,
+        penalty,
+    }
+    .publish(env);
 }
 
 pub fn paused(env: &Env, admin: &Address) {
-    env.events().publish((Symbol::new(env, "paused"), admin.clone()), ());
+    Paused {
+        admin: admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn unpaused(env: &Env, admin: &Address) {
-    env.events().publish((Symbol::new(env, "unpaused"), admin.clone()), ());
+    Unpaused {
+        admin: admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn admin_transfer_initiated(env: &Env, current_admin: &Address, pending_admin: &Address) {
-    env.events().publish(
-        (Symbol::new(env, "adm_xfr_init"), current_admin.clone()),
-        pending_admin.clone(),
-    );
+    AdminTransferInitiated {
+        current_admin: current_admin.clone(),
+        pending_admin: pending_admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn admin_transfer_cancelled(env: &Env, current_admin: &Address, pending_admin: &Address) {
-    env.events().publish(
-        (Symbol::new(env, "adm_xfr_cancel"), current_admin.clone()),
-        pending_admin.clone(),
-    );
+    AdminTransferCancelled {
+        current_admin: current_admin.clone(),
+        pending_admin: pending_admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn admin_transfer_accepted(env: &Env, new_admin: &Address) {
-    env.events().publish((Symbol::new(env, "adm_xfr_done"), new_admin.clone()), ());
+    AdminTransferAccepted {
+        new_admin: new_admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn admin_renounced(env: &Env, former_admin: &Address) {
-    env.events().publish((Symbol::new(env, "adm_renounce"), former_admin.clone()), ());
+    AdminRenounced {
+        former_admin: former_admin.clone(),
+    }
+    .publish(env);
 }
 
-pub fn migrated(
-    env: &Env,
-    depositor: &Address,
-    deposit_id: u32,
-    to_ledger: bool,
-    to_time: bool,
-) {
-    env.events().publish((symbol_short!("migrated"), depositor.clone()), (deposit_id, to_ledger, to_time));
+pub fn migrated(env: &Env, depositor: &Address, deposit_id: u32, to_ledger: bool, to_time: bool) {
+    Migrated {
+        depositor: depositor.clone(),
+        deposit_id,
+        to_ledger,
+        to_time,
+    }
+    .publish(env);
 }
 
-pub fn lock_extended(
-    env: &Env,
-    depositor: &Address,
-    old_unlock_time: u64,
-    new_unlock_time: u64,
-) {
-    env.events().publish(
-        (Symbol::new(env, "lock_extended"), depositor.clone()),
-        (old_unlock_time, new_unlock_time),
-    );
+pub fn lock_extended(env: &Env, depositor: &Address, old_unlock_time: u64, new_unlock_time: u64) {
+    LockExtended {
+        depositor: depositor.clone(),
+        old_unlock_time,
+        new_unlock_time,
+    }
+    .publish(env);
 }
 
 pub fn batch_withdraw(env: &Env, depositor: &Address, count: u32) {
-    env.events().publish((Symbol::new(env, "batch_wdraw"), depositor.clone()), count);
+    BatchWithdraw {
+        depositor: depositor.clone(),
+        count,
+    }
+    .publish(env);
+}
+
+pub fn depositor_frozen(env: &Env, depositor: &Address) {
+    DepositorFrozen {
+        depositor: depositor.clone(),
+    }
+    .publish(env);
+}
+
+pub fn depositor_unfrozen(env: &Env, depositor: &Address) {
+    DepositorUnfrozen {
+        depositor: depositor.clone(),
+    }
+    .publish(env);
 }

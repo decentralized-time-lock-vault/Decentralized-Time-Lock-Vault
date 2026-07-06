@@ -7,8 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `deposit_by_ledger`, `get_vault_by_ledger`, `withdraw_to`, `batch_withdraw`,
+  `migrate_deposit_to_ledger`/`migrate_deposit_to_time`, `freeze_depositor`/
+  `unfreeze_depositor`, `freeze_token`/`unfreeze_token`, `set_max_penalty_bps`/
+  `set_min_cancel_fee`, `get_depositors_page`, `vault_status`, `is_paused` and
+  related read-only helpers.
+- `depositor_frozen` / `depositor_unfrozen` contract events emitted by the
+  freeze/unfreeze admin actions.
+
 ### Changed
-- Documentation clarified current contract behavior for timestamp-based vs ledger-based deposits, pause semantics, and admin recovery.
+- Replaced the ad-hoc `env.events().publish` call in `freeze_depositor` with a
+  proper `depositor_frozen` contract event (previously re-used the `Migrated`
+  event as a placeholder).
+- Refactored the depositor index to a slot-array (`DepositorAt`/`DepositorIndex`)
+  with a `DepositorMember` flag for O(1) duplicate detection and swap-remove on
+  withdrawal.
+- Pagination math (`get_depositors`, `get_all_vaults`) now uses
+  `offset.checked_div(limit)` so `offset` is correctly treated as a flat start
+  index into the full depositor list.
+- Storage docs updated to reflect the slot-array layout and `ActiveDepositCount`
+  tracking (replaces the obsolete `DepositorList` description).
+- Cleaned up dead storage helpers (`get_deposit_ids`, `get_deposit_by_ledger_ids`,
+  `*_limited` variants) that were never called.
+- `BUMP_TARGET` now uses `u64::div_ceil` instead of a hand-rolled division.
+
+### Fixed
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` now pass
+  with no findings (unnecessary borrows, manual checked-division, deprecated
+  `Ledger::protocol_version`, unused imports/variables, bool `assert_eq!`).
+- `freeze_depositor`/`unfreeze_depositor` no longer emit a misleading `Migrated`
+  event.
+
+### Tests
+- 117 unit tests passing, including a new regression test
+  (`test_get_all_vaults_deep_pagination_offset`) guarding the pagination
+  division semantics.
 
 ## [0.1.0] - 2026-05-31
 
