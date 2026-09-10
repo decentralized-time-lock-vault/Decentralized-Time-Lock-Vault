@@ -61,7 +61,7 @@ jobs:
           ls -lh target/time_lock_vault.optimized.wasm
 
       - name: Create GitHub Release and upload WASM
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: target/time_lock_vault.optimized.wasm
           generate_release_notes: true
