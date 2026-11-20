@@ -750,3 +750,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full version history.
 ## License
 
 MIT
+
+## Handsoff notes
+
+<!-- handsoff-issue-51 -->
+- #51: Hello I'll love to work on these issue
